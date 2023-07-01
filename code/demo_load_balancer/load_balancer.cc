@@ -6,11 +6,17 @@
 
 #include "service.grpc.pb.h"
 
+static int port[3] = {50051, 50052, 50053};
+
 class LoadBalancerImpl final : public service::AddOne::Service {
   grpc::Status AddOneMethod(grpc::ServerContext *context,
                             const service::Request *request,
                             service::Response *reply) override {
-    std::string server_address("0.0.0.0:50051");
+    static int i = 0;
+    std::string server_address("0.0.0.0:");
+    server_address += std::to_string(port[i]);
+    i = (i + 1) % 3;
+
     std::unique_ptr<service::AddOne::Stub> stub(
         service::AddOne::NewStub(grpc::CreateChannel(
             server_address, grpc::InsecureChannelCredentials())));
@@ -22,7 +28,7 @@ class LoadBalancerImpl final : public service::AddOne::Service {
 };
 
 void RunLoadBalancer() {
-  std::string server_address("0.0.0.0:50052");
+  std::string server_address("0.0.0.0:6666");
   LoadBalancerImpl service;
 
   grpc::ServerBuilder builder;
