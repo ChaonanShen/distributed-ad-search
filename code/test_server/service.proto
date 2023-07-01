@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package service;
+
+service AddOne {
+    rpc AddOneMethod (Request) returns (Response) {}
+}
+
+message Request {
+    int32 number = 1;
+}
+
+message Response {
+    int32 number = 1;
+}
