@@ -13,9 +13,9 @@ LDFLAGS += -L/usr/local/lib \
 		   -lssl\
 		   -lcrypto\
 		   -O2 -g\
-           -pthread\
+       -pthread\
 		   `pkg-config --libs --static protobuf grpc++`\
-           -ldl
+       -ldl
 PROTOC = protoc
 GRPC_CPP_PLUGIN = grpc_cpp_plugin
 GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
@@ -24,9 +24,18 @@ PROTOS_PATH = ./
 
 vpath %.proto $(PROTOS_PATH)
 
-all: demo_alimama_search_service
+all: server balancer client
 
-demo_alimama_search_service: alimama.pb.o alimama.grpc.pb.o demo_alimama_search_service.o
+util.o: util.cc
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+client: alimama.pb.o alimama.grpc.pb.o client.o util.o
+	$(CXX) $^ $(LDFLAGS) -o $@
+
+server: alimama.pb.o alimama.grpc.pb.o server.o util.o
+	$(CXX) $^ $(LDFLAGS) -o $@
+
+balancer: alimama.pb.o alimama.grpc.pb.o balancer.o util.o
 	$(CXX) $^ $(LDFLAGS) -o $@
 
 .PRECIOUS: %.grpc.pb.cc
@@ -38,7 +47,7 @@ demo_alimama_search_service: alimama.pb.o alimama.grpc.pb.o demo_alimama_search_
 	$(PROTOC) -I $(PROTOS_PATH) --cpp_out=. $<
 
 clean:
-	rm -f *.o *.pb.cc *.pb.h demo_alimama_search_service
+	rm -f *.o *.pb.cc *.pb.h server balancer client
 
 
 # The following is to test your system and ensure a smoother experience.
