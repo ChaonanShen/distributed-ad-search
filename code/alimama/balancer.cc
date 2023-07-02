@@ -59,6 +59,13 @@ void RunLoadBalancer() {
 
   // 创建一个etcd客户端
   etcd::Client etcd("http://etcd:2379");
+
+  // 等待三个server将数据都准备好再注册
+  std::string val;
+  EtcdGetKVWait(etcd, "/node1");
+  EtcdGetKVWait(etcd, "/node2");
+  EtcdGetKVWait(etcd, "/node3");
+
   // 将服务地址注册到etcd中
   // 相当于 etcdctl put /services/searchservice ip:port
   auto response = etcd.set(key, external_address).get();
