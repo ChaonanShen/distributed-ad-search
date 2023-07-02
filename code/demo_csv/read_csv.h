@@ -30,16 +30,22 @@ long getRowsCount(std::string filename) {
   return lineCount;
 }
 
+
+// 使用GCC/CLANG的__attribute__((packed))可以不进行对齐，但是性能会有影响，我这里还是先对齐吧
+// struct __attribute__((packed)) Data {
 struct Data {
   uint64_t keyword;
   uint64_t adgroup_id;
-  uint64_t keyword_prices;
-  int8_t status;
-  char timings_hex[3];
-  float vec1; // 确保sizeof(float) == 4!
-  float vec2;
+
   uint64_t campaign_id;
   uint64_t item_id;
+
+  float vec1; // 确保sizeof(float) == 4!
+  float vec2;
+
+  char timings_hex[3];
+  uint16_t keyword_prices; // price是uint16
+  int8_t status;
 
   void print() {
     cout << "keyword " << keyword << endl;
@@ -124,20 +130,29 @@ private:
 };
 
 // 尝试多种方式，对比
-class AlimamaReader {
+class AlimamaCSVReader {
 public:
-  AlimamaReader() {}
+  // AlimamaCSVReader() {}
 
-  AlimamaReader(string filename) { this->filename_ = filename; }
+  AlimamaCSVReader(string ifilename, string ofilename)
+      : ifilename_(ifilename), ofilename_(ofilename) {}
 
   // TODO(scn): 解析每一行的代码一定要效率高
   // 这里大量的string生成和析构是否开销很大？能否弄个内存池复用 -
   // 不过只要创建时间在10分钟内也无所谓了
-  void readAllData() {
-    // 打开文件
-    int fileDescriptor = open(this->filename_.c_str(), O_RDONLY);
+  void readCsvAndSave() {
+    // 打开csv文件
+    int fileDescriptor = open(this->ifilename_.c_str(), O_RDONLY);
     if (fileDescriptor < 0) {
-      std::cerr << "Error opening file: " << this->filename_ << std::endl;
+      std::cerr << "Error opening file: " << this->ifilename_ << std::endl;
+      return;
+    }
+
+    // 打开最终输出的文件
+    std::ofstream outfile(ofilename_, std::ios::binary);
+    if (!outfile) {
+      std::cerr << "Failed to open the file for writing: " << ofilename_
+                << std::endl;
       return;
     }
 
@@ -176,8 +191,12 @@ public:
 
       lineStart = lineEnd + 1;
       linecount++;
-
+      static int count = 1;
+      std::cout << count++ << ":" << std::endl;
       entry.print();
+
+      // 直接用内存到磁盘数据的映射
+      outfile.write((char *)&entry, sizeof(Data));
     }
 
     // 解除内存映射
@@ -186,6 +205,7 @@ public:
     }
 
     close(fileDescriptor);
+    outfile.close();
   }
 
   void readOneLine(const char *lineStart, int len, Data &entry) {
@@ -240,9 +260,29 @@ public:
     entry.item_id = item_id;
   }
 
+  std::vector<Data> readFromDisk() {
+    std::vector<Data> data;
+    std::ifstream infile(ofilename_, std::ios::binary);
+    if (!infile) {
+      std::cerr << "Failed to open the file for reading: " << ofilename_
+                << std::endl;
+      return data;
+    }
+    while (infile) {
+      Data d;
+      infile.read((char *)&d, sizeof(Data));
+      if (infile) { // 这个好像不能缺，不然数据仿佛会诡异的多出一行
+        data.push_back(d);
+      }
+    }
+    infile.close();
+    return data;
+  }
+
 private:
   // raw data filename
-  string filename_;
+  string ifilename_; // 输入的csv文件名
+  string ofilename_; // 输出的二进制文件名
   mutex mtx_;
   int file_count_ = 0;
 };

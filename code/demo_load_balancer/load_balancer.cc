@@ -22,7 +22,6 @@ class LoadBalancerImpl final : public service::AddOne::Service {
             server_address, grpc::InsecureChannelCredentials())));
 
     grpc::ClientContext client_context;
-
     return stub->AddOneMethod(&client_context, *request, reply);
   }
 };
