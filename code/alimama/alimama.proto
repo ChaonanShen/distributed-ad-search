@@ -25,6 +25,19 @@ message Response {
   repeated uint64 prices = 2;
 }
 
+// SeachLocal返回的结果
+message Response2 {
+  repeated uint64 adgroup_ids = 1;
+}
+
+/* 
+SearchLocal表示Request已经保证Requst是本地的了
+而使用Search则会将Request分成三份发给不同的server进行SearchLocal，然后收到回复后
+*/
 service SearchService {
   rpc Search(Request) returns (Response) {}
+}
+
+service SearchLocalService {
+  rpc SearchLocal(Request) returns (Response) {}
 }

@@ -205,7 +205,7 @@ public:
 
   // 判断这个Data entry是否是满足条件的 - hash到当前节点 status为1
   bool filter(Data &entry) {
-    // TODO(scn): 这个
+    // TODO(scn): 这个为啥直接entry.status==1判断就有问题？？？
     return (entry.status & 1) && (hash_(entry.keyword) == (node_id_ - 1));
   }
 

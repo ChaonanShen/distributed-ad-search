@@ -24,6 +24,8 @@ static int ports[3] = {50051, 50052, 50053};
 class LoadBalancerImpl final : public SearchService::Service {
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
+    
+    
     // 轮流转发给不同的机器
     static int i = 0;
     std::string server_address("0.0.0.0:");

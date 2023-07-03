@@ -25,13 +25,16 @@ PROTOS_PATH = ./
 
 vpath %.proto $(PROTOS_PATH)
 
-all: server balancer client one_client
+all: server balancer client one_client local_client
 
 # 如何自动找到依赖的头文件！
 util.o: util.cc util.h 
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 one_client: alimama.pb.o alimama.grpc.pb.o one_client.o util.o
+	$(CXX) $^ $(LDFLAGS) -o $@
+
+local_client: alimama.pb.o alimama.grpc.pb.o local_client.o util.o
 	$(CXX) $^ $(LDFLAGS) -o $@
 
 client: alimama.pb.o alimama.grpc.pb.o client.o util.o
@@ -52,7 +55,7 @@ balancer: alimama.pb.o alimama.grpc.pb.o balancer.o util.o
 	$(PROTOC) -I $(PROTOS_PATH) --cpp_out=. $<
 
 clean:
-	rm -f *.o *.pb.cc *.pb.h server balancer client one_client
+	rm -f *.o *.pb.cc *.pb.h server balancer client one_client local_client
 
 
 # The following is to test your system and ensure a smoother experience.

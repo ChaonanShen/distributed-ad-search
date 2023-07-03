@@ -54,8 +54,8 @@ std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
     // 读出数据
     Data entry = *(Data *)((char *)fileData + offset);
     // 确保能读出正确的数据
-    // std::cout << "keyword: " << it->first << " offset: " << offset <<
-    // std::endl; entry.print();
+    // std::cout << "keyword: " << it->first << " offset: " << offset << std::endl;
+    // entry.print();
     if (filterHour(entry, hour)) { // 要时段匹配的
       topN.insert({entry, GetDataScore(entry, context_vec[0], context_vec[1])});
     }

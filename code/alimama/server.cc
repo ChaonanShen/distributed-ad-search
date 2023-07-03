@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <semaphore.h>
+
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include <grpcpp/grpcpp.h>
 #include <grpcpp/health_check_service_interface.h>
@@ -26,6 +28,7 @@ using grpc::Status;
 
 using alimama::proto::Request;
 using alimama::proto::Response;
+using alimama::proto::SearchLocalService;
 using alimama::proto::SearchService;
 
 #include "util.h"
@@ -39,6 +42,23 @@ extern void *fileData;
 // keyword -> 文件中offset
 // using IndexType = std::unordered_multimap<uint64_t, uint64_t>;
 extern IndexType kw2offset;
+
+/**
+ * 两个server
+ * SearchService将Request分割发给不同servers，然后再合起来，排序返回
+ * SearchLocalService收到的Request里面keyword一定在本地，返回个map，里面是不同广告单元(相当于是每个keyword的广告)以及之后排序需要的信息
+ * TODO: 一个权衡 - 是rpc请求/回复中字段多一些 还是 本地查询更多一些
+ * 就是网络带宽和本地磁盘带宽的比拼
+ * 目前我选择SearchLocal将返回所有最终排序里所需要的内容
+ * SearchLocal返回各个keywords排名topn+1的字段
+ */
+
+class SearchLocalServiceImpl final : public SearchLocalService::Service {
+  // 处理确保所有Request中的keyword一定在本地存在
+  // 需要返回的是topn+1的keyword+排序分数
+  Status SearchLocal(ServerContext *context, const Request *request,
+                     Response *response) override {}
+};
 
 class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
@@ -63,12 +83,17 @@ class SearchServiceImpl final : public SearchService::Service {
       }
     }
 
+    // 两浮点数在1e-6误差范围内认为是相等
+    auto floatEqual = [](float f1, float f2) -> bool {
+      return std::abs(f1 - f2) < 1e-6;
+    };
+
     // 先按照分数排序
     std::sort(preResult.begin(), preResult.end(),
-              [](const DataScore &ds1, const DataScore &ds2) {
+              [floatEqual](const DataScore &ds1, const DataScore &ds2) {
                 // 排序分数高的在前 -> 排序分数相同则出价低的在前 ->
                 // 否则adgroup_id大的在前
-                if (ds1.score != ds2.score)
+                if (!floatEqual(ds1.score, ds2.score))
                   return ds1.score > ds2.score;
                 else if (ds1.data.keyword_prices != ds2.data.keyword_prices)
                   return ds1.data.keyword_prices < ds2.data.keyword_prices;
@@ -109,8 +134,16 @@ class SearchServiceImpl final : public SearchService::Service {
 
     // 最后一名分数确定了，其他的依次计算
     for (int i = ((int)prices.size() - 2); i >= 0; i--) {
-      prices[i] = prices[i + 1] /
+      prices[i] = result[i + 1].score /
                   GetCTR(result[i].data, context_vec[0], context_vec[1]);
+    }
+
+    // 所有参与排序的分数结果
+    std::cout << "\n\nsort size = " << prices.size() << std::endl;
+    for (int i = 0; i < prices.size(); i++) {
+      result[i].data.print();
+      std::cout << "i=" << i << " score=" << result[i].score
+                << " price=" << prices[i] << std::endl;
     }
 
     for (int i = 0; i < prices.size() && i < topn; i++) {
@@ -122,17 +155,61 @@ class SearchServiceImpl final : public SearchService::Service {
   }
 };
 
-void RunServer(int port) {
-  std::string server_address(std::string("0.0.0.0:") + std::to_string(port));
+void RunServers(int port) {
+  sem_t sem;
+  sem_init(&sem, 0, 0);
 
-  SearchServiceImpl service;
-  ServerBuilder builder;
-  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-  builder.RegisterService(&service);
+  // 运行两个rpc server - t1是会split
+  // Request然后分发给不同server的，t2是确保Request一定都是本地的keywords的
+  std::thread t1(
+      [](int port, sem_t &sem) {
+        std::string server_address(std::string("0.0.0.0:") +
+                                   std::to_string(port));
 
-  std::unique_ptr<Server> server(builder.BuildAndStart());
+        SearchServiceImpl service;
+        ServerBuilder builder;
+        builder.AddListeningPort(server_address,
+                                 grpc::InsecureServerCredentials());
+        builder.RegisterService(&service);
 
-  std::cout << "Server listening on " << server_address << std::endl;
+        std::unique_ptr<Server> server(builder.BuildAndStart());
+
+        std::cout << "Search Server listening on " << server_address
+                  << std::endl;
+
+        // 信号量同步点，也就是说线程中执行到这个位置，RunServers才能继续
+        sem_post(&sem);
+
+        server->Wait();
+      },
+      port, sem);
+
+  std::thread t2(
+      [](int port, sem_t &sem) {
+        std::string server_address(std::string("0.0.0.0:") +
+                                   std::to_string(port + 10));
+
+        SearchLocalServiceImpl service;
+        ServerBuilder builder;
+        builder.AddListeningPort(server_address,
+                                 grpc::InsecureServerCredentials());
+        builder.RegisterService(&service);
+
+        std::unique_ptr<Server> server(builder.BuildAndStart());
+
+        std::cout << "SearchLocal Server listening on " << server_address
+                  << std::endl;
+
+        // 信号量同步点，也就是说线程中执行到这个位置，RunServers才能继续
+        sem_post(&sem);
+
+        server->Wait();
+      },
+      port, sem);
+
+  // 同步点：等两个线程都执行到同步位置才能继续进行注册
+  sem_wait(&sem);
+  sem_wait(&sem);
 
   // server运行起来，可以注册了
   // 创建一个etcd客户端
@@ -140,7 +217,10 @@ void RunServer(int port) {
   std::string key = "/node" + std::to_string(NODE_ID);
   EtcdSetKV(etcd, key, "");
 
-  server->Wait();
+  std::cout << "server-" << port << " registeration success" << std::endl;
+
+  t1.join();
+  t2.join();
 }
 
 int main(int argc, char **argv) {
@@ -155,9 +235,14 @@ int main(int argc, char **argv) {
   // 将csv中对应数据读取出来 保存到磁盘上 同时建立内存索引
   // std::string ifilename = "../../data/data.csv";
   std::string ifilename = "/data/data.csv";
-  std::string ofilename = "savedFile";
+  std::string ofilename = std::string("savedFile") + std::to_string(NODE_ID);
 
   prepareData(NODE_ID, kw2offset, ifilename, ofilename);
+
+  // 打印下内存索引
+  // for (auto it : kw2offset) {
+  //   std::cout << it.first << " -> " << it.second << std::endl;
+  // }
 
   // 生成mmap
   int fd = open(ofilename.c_str(), O_RDONLY);
@@ -181,7 +266,7 @@ int main(int argc, char **argv) {
   }
 
   // 运行server，接受请求
-  RunServer(port);
+  RunServers(port);
 
   return 0;
 }
