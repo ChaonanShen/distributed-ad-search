@@ -196,6 +196,8 @@ public:
       std::cerr << "Error unmapping file from memory." << std::endl;
     }
 
+    std::cout << "line_count: " << linecount << std::endl;
+
     close(fileDescriptor);
     outfile.close();
   }
