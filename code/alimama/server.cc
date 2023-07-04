@@ -37,23 +37,26 @@ using alimama::proto::SearchService;
 #include "util.h"
 
 // Search Servers的ports
-static int PORTS[3] = {50051, 50052, 50053};
+static const int PORTS[3] = {50051, 50052, 50053};
 // SearchLocal Servers的ports
-static int PORTS2[3] = {50061, 50062, 50063};
+static const int PORTS2[3] = {50061, 50062, 50063};
 
 static int port = -1;
 static int NODE_ID = 1;
+// 其他
+static std::string searchServersAddr[3];
+static std::string searchLocalServersAddr[3];
 
-static std::string getSearchServerAddr() {
-  return std::string("0.0.0.0:") + std::to_string(port);
+static std::string getCurrentSearchServerAddr() {
+  return getLocalIP() + ":" + std::to_string(port);
 }
 
-static std::string getSearchLocalServerAddr() {
-  return std::string("0.0.0.0:") + std::to_string(port + 10);
+static std::string getCurrentSearchLocalServerAddr() {
+  return getLocalIP() + ":" + std::to_string(port + 10);
 }
 
-static std::string getTransferServerAddr(int index) {
-  return std::string("0.0.0.0:") + std::to_string(PORTS2[index]);
+static std::string getSearchLocalServerAddr(int index) {
+  return searchLocalServersAddr[index];
 }
 
 // mmap文件指针
@@ -83,7 +86,7 @@ class SearchLocalServiceImpl final : public SearchLocalService::Service {
   // 需要返回的是topn+1的keyword+排序分数
   Status SearchLocal(ServerContext *context, const Request *request,
                      ResponseLocal *response) override {
-    std::cout << "SearchLocalServer:" << getSearchLocalServerAddr()
+    std::cout << "SearchLocalServer:" << getCurrentSearchLocalServerAddr()
               << " receive request" << std::endl;
 
     // 已经确保所有Request中的keywords都是在本地
@@ -163,8 +166,8 @@ class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
-    std::cout << "SearchServer:" << getSearchServerAddr() << " receive request"
-              << std::endl;
+    std::cout << "SearchServer:" << getCurrentSearchServerAddr()
+              << " receive request" << std::endl;
 
     uint64_t hour = request->hour(), topn = request->topn();
     float context_vec[2] = {request->context_vector(0),
@@ -203,14 +206,18 @@ class SearchServiceImpl final : public SearchService::Service {
             req.set_topn(topn);
 
             ClientContext context;
-            auto server_addr = getTransferServerAddr(i);
+            auto remote_addr = getSearchLocalServerAddr(i);
             std::unique_ptr<SearchLocalService::Stub> stub(
                 SearchLocalService::NewStub(grpc::CreateChannel(
-                    server_addr, grpc::InsecureChannelCredentials())));
+                    remote_addr, grpc::InsecureChannelCredentials())));
             Status status = stub->SearchLocal(&context, req, &resp);
             if (!status.ok()) {
-              std::cout << "to " << server_addr << " SearchLocal RPC failed"
+              std::cout << getCurrentSearchServerAddr() << " subrequest -> "
+                        << remote_addr << " SearchLocal RPC failed"
                         << std::endl;
+            } else {
+              std::cout << getCurrentSearchServerAddr() << " subrequest -> "
+                        << remote_addr << " SearchLocal RPC ok" << std::endl;
             }
           },
           i, hour, topn, context_vec, std::cref(keywords[i]),
@@ -231,7 +238,6 @@ class SearchServiceImpl final : public SearchService::Service {
       if (sz == 0)
         continue;
 
-      // 为啥这个size居然会是复数啊
       std::cout << "SearchLocal respLocal[" << i << "] size=" << sz
                 << std::endl;
       for (int i = 0; i < sz; i++) {
@@ -304,8 +310,6 @@ class SearchServiceImpl final : public SearchService::Service {
       response->add_prices(static_cast<uint64_t>(std::round(prices[i])));
     }
 
-    std::cout << "==============================" << std::endl;
-
     return Status::OK;
   }
 };
@@ -318,7 +322,7 @@ void RunServers(int port) {
   // Request然后分发给不同server的，t2是确保Request一定都是本地的keywords的
   std::thread t1(
       [port](sem_t *sem) {
-        std::string server_address = getSearchServerAddr();
+        std::string server_address = getCurrentSearchServerAddr();
 
         SearchServiceImpl service;
         ServerBuilder builder;
@@ -340,7 +344,7 @@ void RunServers(int port) {
 
   std::thread t2(
       [port](sem_t *sem) {
-        std::string server_address = getSearchLocalServerAddr();
+        std::string server_address = getCurrentSearchLocalServerAddr();
 
         SearchLocalServiceImpl service;
         ServerBuilder builder;
@@ -368,9 +372,18 @@ void RunServers(int port) {
   // 创建一个etcd客户端
   etcd::Client etcd("http://etcd:2379");
   std::string key = "/node" + std::to_string(NODE_ID);
-  EtcdSetKV(etcd, key, "");
+  EtcdSetKV(etcd, key,
+            getCurrentSearchServerAddr() + " " +
+                getCurrentSearchLocalServerAddr());
 
   std::cout << "server-" << port << " registeration success" << std::endl;
+
+  splitStr(EtcdGetKVWait(etcd, "/node1"), searchServersAddr[0],
+           searchLocalServersAddr[0]);
+  splitStr(EtcdGetKVWait(etcd, "/node2"), searchServersAddr[1],
+           searchLocalServersAddr[1]);
+  splitStr(EtcdGetKVWait(etcd, "/node3"), searchServersAddr[2],
+           searchLocalServersAddr[2]);
 
   t1.join();
   t2.join();

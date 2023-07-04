@@ -19,7 +19,8 @@ using alimama::proto::Request;
 using alimama::proto::Response;
 using alimama::proto::SearchService;
 
-static int ports[3] = {50051, 50052, 50053};
+// server1 ip1:50051 server2 ip2:50052 server3 ip3:50053
+static std::string searchServerAddrs[3];
 
 class LoadBalancerImpl final : public SearchService::Service {
   Status Search(ServerContext *context, const Request *request,
@@ -27,18 +28,28 @@ class LoadBalancerImpl final : public SearchService::Service {
 
     // 轮流转发给不同的机器
     static int i = 0;
-    std::string server_address("0.0.0.0:");
-    server_address += std::to_string(ports[i]);
+    std::string server_address = searchServerAddrs[i];
     i = (i + 1) % 3;
 
-    std::cout << "balancer send request to " << server_address << std::endl;
+    static uint64_t cnt = 0;
+    cnt++;
+    std::cout << "================== balancer send request" << cnt << " to "
+              << server_address << std::endl;
 
     std::unique_ptr<SearchService::Stub> stub(
         SearchService::NewStub(grpc::CreateChannel(
             server_address, grpc::InsecureChannelCredentials())));
 
     grpc::ClientContext client_context;
-    return stub->Search(&client_context, *request, response);
+    auto status = stub->Search(&client_context, *request, response);
+    if (status.ok()) {
+      std::cout << "================== balancer receive response" << cnt
+                << " from " << server_address << " RPC ok" << std::endl;
+    } else {
+      std::cout << "================== balancer receive response" << cnt
+                << " from " << server_address << " RPC failed" << std::endl;
+    }
+    return status;
   }
 };
 
@@ -50,7 +61,7 @@ void RunLoadBalancer() {
   // external_address暴露给外界的ip:port，server_address就是0.0.0.0:port
   std::string external_address =
       local_ip + std::string(":") + std::to_string(kPort);
-  std::string server_address(std::string("0.0.0.0:") + std::to_string(kPort));
+  std::string server_address("0.0.0.0:" + std::to_string(kPort));
   std::string key = std::string("/services/searchservice");
 
   LoadBalancerImpl service;
@@ -61,24 +72,24 @@ void RunLoadBalancer() {
   std::unique_ptr<Server> server(builder.BuildAndStart());
 
   // TODO(scn)： 本地测试和线上测试这里要修改
-  // // 创建一个etcd客户端
-  // etcd::Client etcd("http://etcd:2379");
+  // 创建一个etcd客户端
+  etcd::Client etcd("http://etcd:2379");
 
-  // // 等待三个server将数据都准备好再注册
-  // std::string val;
-  // EtcdGetKVWait(etcd, "/node1");
-  // EtcdGetKVWait(etcd, "/node2");
-  // EtcdGetKVWait(etcd, "/node3");
+  // 等待三个server将数据都准备好再注册
+  std::string dummy_str;
+  splitStr(EtcdGetKVWait(etcd, "/node1"), searchServerAddrs[0], dummy_str);
+  splitStr(EtcdGetKVWait(etcd, "/node2"), searchServerAddrs[1], dummy_str);
+  splitStr(EtcdGetKVWait(etcd, "/node3"), searchServerAddrs[2], dummy_str);
 
-  // // 将服务地址注册到etcd中
-  // // 相当于 etcdctl put /services/searchservice ip:port
-  // auto response = etcd.set(key, external_address).get();
-  // if (response.is_ok()) {
-  //   std::cout << "Service registration successful.\n";
-  // } else {
-  //   std::cerr << "Service registration failed: " << response.error_message()
-  //             << "\n";
-  // }
+  // 将服务地址注册到etcd中
+  // 相当于 etcdctl put /services/searchservice ip:port
+  auto response = etcd.set(key, external_address).get();
+  if (response.is_ok()) {
+    std::cout << "Service registration successful.\n";
+  } else {
+    std::cerr << "Service registration failed: " << response.error_message()
+              << "\n";
+  }
 
   std::cout << "Balancer listening on " << server_address << std::endl;
   server->Wait();

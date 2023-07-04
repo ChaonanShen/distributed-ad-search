@@ -14,6 +14,12 @@ IndexType kw2offset;
 
 int hashKeyword(uint64_t keyword) { return keyword % 3; }
 
+void splitStr(std::string str, std::string &s1, std::string &s2) {
+  auto pos = str.find_first_of(" ");
+  s1 = str.substr(0, pos);
+  s2 = str.substr(pos + 1);
+};
+
 // 读取csv数据(满足hash(x)==node_id-1的)，紧凑的保存，建立内存索引
 void prepareData(int node_id, IndexType &index, std::string ifilename,
                  std::string ofilename) {
