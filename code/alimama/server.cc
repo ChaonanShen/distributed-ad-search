@@ -36,7 +36,11 @@ using alimama::proto::SearchService;
 
 #include "util.h"
 
+// Search Servers的ports
 static int PORTS[3] = {50051, 50052, 50053};
+// SearchLocal Servers的ports
+static int PORTS2[3] = {50061, 50062, 50063};
+
 static int port = -1;
 static int NODE_ID = 1;
 
@@ -46,6 +50,10 @@ static std::string getSearchServerAddr() {
 
 static std::string getSearchLocalServerAddr() {
   return std::string("0.0.0.0:") + std::to_string(port + 10);
+}
+
+static std::string getTransferServerAddr(int index) {
+  return std::string("0.0.0.0:") + std::to_string(PORTS2[index]);
 }
 
 // mmap文件指针
@@ -75,6 +83,9 @@ class SearchLocalServiceImpl final : public SearchLocalService::Service {
   // 需要返回的是topn+1的keyword+排序分数
   Status SearchLocal(ServerContext *context, const Request *request,
                      ResponseLocal *response) override {
+    std::cout << "SearchLocalServer:" << getSearchLocalServerAddr()
+              << " receive request" << std::endl;
+
     // 已经确保所有Request中的keywords都是在本地
     uint64_t hour = request->hour(), topn = request->topn();
     float context_vec[2] = {request->context_vector(0),
@@ -152,6 +163,9 @@ class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
+    std::cout << "SearchServer:" << getSearchServerAddr() << " receive request"
+              << std::endl;
+
     uint64_t hour = request->hour(), topn = request->topn();
     float context_vec[2] = {request->context_vector(0),
                             request->context_vector(1)};
@@ -189,7 +203,7 @@ class SearchServiceImpl final : public SearchService::Service {
             req.set_topn(topn);
 
             ClientContext context;
-            auto server_addr = getSearchLocalServerAddr();
+            auto server_addr = getTransferServerAddr(i);
             std::unique_ptr<SearchLocalService::Stub> stub(
                 SearchLocalService::NewStub(grpc::CreateChannel(
                     server_addr, grpc::InsecureChannelCredentials())));
@@ -280,7 +294,7 @@ class SearchServiceImpl final : public SearchService::Service {
     }
 
     // 所有参与排序的分数结果
-    std::cout << "\n\nsort size = " << prices.size() << std::endl;
+    std::cout << "sort size = " << prices.size() << std::endl;
     for (int i = 0; i < prices.size(); i++) {
       result[i].print();
     }
@@ -289,6 +303,8 @@ class SearchServiceImpl final : public SearchService::Service {
       response->add_adgroup_ids(result[i].adgroup_id);
       response->add_prices(static_cast<uint64_t>(std::round(prices[i])));
     }
+
+    std::cout << "==============================" << std::endl;
 
     return Status::OK;
   }
@@ -370,8 +386,8 @@ int main(int argc, char **argv) {
 
   // TODO(scn): 数据处理逻辑
   // 将csv中对应数据读取出来 保存到磁盘上 同时建立内存索引
-  std::string ifilename = "../../data/data.csv";
-  // std::string ifilename = "/data/data.csv";
+
+  std::string ifilename = "/data/data.csv";
   std::string ofilename = std::string("savedFile") + std::to_string(NODE_ID);
 
   prepareData(NODE_ID, kw2offset, ifilename, ofilename);

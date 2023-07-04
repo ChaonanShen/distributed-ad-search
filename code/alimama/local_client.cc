@@ -79,43 +79,103 @@ int main(int argc, char **argv) {
   // }
   // std::string server_address = response.value().as_string();
 
-  {
-    std::string server_address("0.0.0.0:50051");
-    std::cout << "server_address " << server_address << std::endl;
-    SearchClient client(grpc::CreateChannel(
-        server_address, grpc::InsecureChannelCredentials()));
-    std::cout << "Request keyword: " << 2916200016 << std::endl;
-    std::vector<uint64_t> keywords = {2916200016};
-    std::vector<float> context_vector = {0.351177, 0.936309};
-    uint64_t hour = 7;
-    uint64_t topn = 2;
-    client.Search(keywords, context_vector, hour, topn);
-  }
+  // *** 注意这就是在本地测试进行的，在同一个阿里妈妈容器中运行balancer &
+  // servers ***
 
-  {
-    std::string server_address("0.0.0.0:50052");
-    std::cout << "server_address " << server_address << std::endl;
-    SearchClient client(grpc::CreateChannel(
-        server_address, grpc::InsecureChannelCredentials()));
-    std::cout << "Request keyword: " << 12210106372 << std::endl;
-    std::vector<uint64_t> keywords = {12210106372};
-    std::vector<float> context_vector = {0.975501, 0.219997};
-    uint64_t hour = 16;
-    uint64_t topn = 3;
-    client.Search(keywords, context_vector, hour, topn);
-  }
+  bool use_balancer = true;
+  // 不使用balancer就直接发往对应server，否则就发往balancer
+  if (use_balancer) {
+    // 三个请求分开单独进行就没事，但是一起就会有事
+    // 难道是线程之间相互干扰？？？但是没啥全局变量啊
 
-  {
-    std::string server_address("0.0.0.0:50053");
-    std::cout << "server_address " << server_address << std::endl;
+    std::string balancer_address("0.0.0.0:56789");
+    std::cout << "balancer_address " << balancer_address << std::endl;
     SearchClient client(grpc::CreateChannel(
-        server_address, grpc::InsecureChannelCredentials()));
-    std::cout << "Request keyword: " << 4803367238 << std::endl;
-    std::vector<uint64_t> keywords = {4803367238};
-    std::vector<float> context_vector = {0.552321, 0.833632};
-    uint64_t hour = 20;
-    uint64_t topn = 1;
-    client.Search(keywords, context_vector, hour, topn);
+        balancer_address, grpc::InsecureChannelCredentials()));
+
+    {
+      // 2916200016 12210106372 4803367238 0.975501,0.219997 0 2
+      // 1496148419000,1371046260120 37007,27489
+      std::vector<uint64_t> keywords = {2916200016, 12210106372, 4803367238};
+      std::vector<float> context_vector = {0.975501, 0.219997};
+      uint64_t hour = 0;
+      uint64_t topn = 2;
+      client.Search(keywords, context_vector, hour, topn);
+    }
+
+    // 下面三个是单独的一个keyword的检索，最基本的检索
+    {
+      // 2916200016	0.351177,0.936309	7	2
+      // 644960096148,1710671559561	27435,39778
+      std::cout << "Request keyword: " << 2916200016 << std::endl;
+      std::vector<uint64_t> keywords = {2916200016};
+      std::vector<float> context_vector = {0.351177, 0.936309};
+      uint64_t hour = 7;
+      uint64_t topn = 2;
+      client.Search(keywords, context_vector, hour, topn);
+    }
+
+    {
+      // 12210106372	0.975501,0.219997	16	3
+      // 1804714034430	41953
+      std::cout << "Request keyword: " << 12210106372 << std::endl;
+      std::vector<uint64_t> keywords = {12210106372};
+      std::vector<float> context_vector = {0.975501, 0.219997};
+      uint64_t hour = 16;
+      uint64_t topn = 3;
+      client.Search(keywords, context_vector, hour, topn);
+    }
+
+    {
+      // 4803367238	0.552321,0.833632	20	1
+      // 722542970812	17934
+      std::cout << "Request keyword: " << 4803367238 << std::endl;
+      std::vector<uint64_t> keywords = {4803367238};
+      std::vector<float> context_vector = {0.552321, 0.833632};
+      uint64_t hour = 20;
+      uint64_t topn = 1;
+      client.Search(keywords, context_vector, hour, topn);
+    }
+  } else {
+    // 现在单独发给各个servers的请求都没有问题
+    {
+      std::string server_address("0.0.0.0:50051");
+      std::cout << "server_address " << server_address << std::endl;
+      SearchClient client(grpc::CreateChannel(
+          server_address, grpc::InsecureChannelCredentials()));
+      std::cout << "Request keyword: " << 2916200016 << std::endl;
+      std::vector<uint64_t> keywords = {2916200016};
+      std::vector<float> context_vector = {0.351177, 0.936309};
+      uint64_t hour = 7;
+      uint64_t topn = 2;
+      client.Search(keywords, context_vector, hour, topn);
+    }
+
+    {
+      std::string server_address("0.0.0.0:50052");
+      std::cout << "server_address " << server_address << std::endl;
+      SearchClient client(grpc::CreateChannel(
+          server_address, grpc::InsecureChannelCredentials()));
+      std::cout << "Request keyword: " << 12210106372 << std::endl;
+      std::vector<uint64_t> keywords = {12210106372};
+      std::vector<float> context_vector = {0.975501, 0.219997};
+      uint64_t hour = 16;
+      uint64_t topn = 3;
+      client.Search(keywords, context_vector, hour, topn);
+    }
+
+    {
+      std::string server_address("0.0.0.0:50053");
+      std::cout << "server_address " << server_address << std::endl;
+      SearchClient client(grpc::CreateChannel(
+          server_address, grpc::InsecureChannelCredentials()));
+      std::cout << "Request keyword: " << 4803367238 << std::endl;
+      std::vector<uint64_t> keywords = {4803367238};
+      std::vector<float> context_vector = {0.552321, 0.833632};
+      uint64_t hour = 20;
+      uint64_t topn = 1;
+      client.Search(keywords, context_vector, hour, topn);
+    }
   }
 
   return 0;

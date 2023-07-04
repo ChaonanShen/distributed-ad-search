@@ -24,13 +24,14 @@ static int ports[3] = {50051, 50052, 50053};
 class LoadBalancerImpl final : public SearchService::Service {
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
-    
-    
+
     // 轮流转发给不同的机器
     static int i = 0;
     std::string server_address("0.0.0.0:");
     server_address += std::to_string(ports[i]);
     i = (i + 1) % 3;
+
+    std::cout << "balancer send request to " << server_address << std::endl;
 
     std::unique_ptr<SearchService::Stub> stub(
         SearchService::NewStub(grpc::CreateChannel(
@@ -59,24 +60,25 @@ void RunLoadBalancer() {
 
   std::unique_ptr<Server> server(builder.BuildAndStart());
 
-  // 创建一个etcd客户端
-  etcd::Client etcd("http://etcd:2379");
+  // TODO(scn)： 本地测试和线上测试这里要修改
+  // // 创建一个etcd客户端
+  // etcd::Client etcd("http://etcd:2379");
 
-  // 等待三个server将数据都准备好再注册
-  std::string val;
-  EtcdGetKVWait(etcd, "/node1");
-  EtcdGetKVWait(etcd, "/node2");
-  EtcdGetKVWait(etcd, "/node3");
+  // // 等待三个server将数据都准备好再注册
+  // std::string val;
+  // EtcdGetKVWait(etcd, "/node1");
+  // EtcdGetKVWait(etcd, "/node2");
+  // EtcdGetKVWait(etcd, "/node3");
 
-  // 将服务地址注册到etcd中
-  // 相当于 etcdctl put /services/searchservice ip:port
-  auto response = etcd.set(key, external_address).get();
-  if (response.is_ok()) {
-    std::cout << "Service registration successful.\n";
-  } else {
-    std::cerr << "Service registration failed: " << response.error_message()
-              << "\n";
-  }
+  // // 将服务地址注册到etcd中
+  // // 相当于 etcdctl put /services/searchservice ip:port
+  // auto response = etcd.set(key, external_address).get();
+  // if (response.is_ok()) {
+  //   std::cout << "Service registration successful.\n";
+  // } else {
+  //   std::cerr << "Service registration failed: " << response.error_message()
+  //             << "\n";
+  // }
 
   std::cout << "Balancer listening on " << server_address << std::endl;
   server->Wait();
