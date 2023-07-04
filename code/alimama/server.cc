@@ -86,9 +86,6 @@ class SearchLocalServiceImpl final : public SearchLocalService::Service {
   // 需要返回的是topn+1的keyword+排序分数
   Status SearchLocal(ServerContext *context, const Request *request,
                      ResponseLocal *response) override {
-    std::cout << "SearchLocalServer:" << getCurrentSearchLocalServerAddr()
-              << " receive request" << std::endl;
-
     // 已经确保所有Request中的keywords都是在本地
     uint64_t hour = request->hour(), topn = request->topn();
     float context_vec[2] = {request->context_vector(0),
@@ -166,9 +163,6 @@ class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
-    std::cout << "SearchServer:" << getCurrentSearchServerAddr()
-              << " receive request" << std::endl;
-
     uint64_t hour = request->hour(), topn = request->topn();
     float context_vec[2] = {request->context_vector(0),
                             request->context_vector(1)};
@@ -215,9 +209,6 @@ class SearchServiceImpl final : public SearchService::Service {
               std::cout << getCurrentSearchServerAddr() << " subrequest -> "
                         << remote_addr << " SearchLocal RPC failed"
                         << std::endl;
-            } else {
-              std::cout << getCurrentSearchServerAddr() << " subrequest -> "
-                        << remote_addr << " SearchLocal RPC ok" << std::endl;
             }
           },
           i, hour, topn, context_vec, std::cref(keywords[i]),
@@ -238,8 +229,6 @@ class SearchServiceImpl final : public SearchService::Service {
       if (sz == 0)
         continue;
 
-      std::cout << "SearchLocal respLocal[" << i << "] size=" << sz
-                << std::endl;
       for (int i = 0; i < sz; i++) {
         preResult.emplace_back(
             LocalResult{resp.array(i).adgroup_id(), resp.array(i).ctr(),
@@ -299,11 +288,11 @@ class SearchServiceImpl final : public SearchService::Service {
       prices[i] = result[i + 1].score / result[i].ctr;
     }
 
-    // 所有参与排序的分数结果
-    std::cout << "sort size = " << prices.size() << std::endl;
-    for (int i = 0; i < prices.size(); i++) {
-      result[i].print();
-    }
+    // 打印所有参与排序的分数结果
+    // std::cout << "sort size = " << prices.size() << std::endl;
+    // for (int i = 0; i < prices.size(); i++) {
+    //   result[i].print();
+    // }
 
     for (int i = 0; i < prices.size() && i < topn; i++) {
       response->add_adgroup_ids(result[i].adgroup_id);
@@ -406,9 +395,9 @@ int main(int argc, char **argv) {
   prepareData(NODE_ID, kw2offset, ifilename, ofilename);
 
   // 打印下内存索引
-  for (auto it : kw2offset) {
-    std::cout << it.first << " -> " << it.second << std::endl;
-  }
+  // for (auto it : kw2offset) {
+  //   std::cout << it.first << " -> " << it.second << std::endl;
+  // }
 
   // 生成mmap
   int fd = open(ofilename.c_str(), O_RDONLY);

@@ -156,8 +156,8 @@ public:
     }
     off_t fileSize = fileInfo.st_size;
 
-    void *fData = mmap(nullptr, fileSize, PROT_READ | PROT_WRITE, MAP_PRIVATE,
-                       fileDescriptor, 0);
+    void *fData =
+        mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fileDescriptor, 0);
 
     if (fData == MAP_FAILED) {
       std::cerr << "Error mapping file to memory." << std::endl;
@@ -180,20 +180,15 @@ public:
       size_t len = lineEnd - lineStart;
 
       Data entry;
-      readCsvLine(lineStart, len, entry);
-
-      lineStart = lineEnd + 1;
-      linecount++;
-      // entry.print();
-
-      // 只有符合要求的数据才写入
-      if (filter(entry)) {
+      if (readCsvLine(lineStart, len, entry)) { // true才是满足条件的entry
+        linecount++;
         // 直接用内存到磁盘数据的映射
         outfile.write((char *)&entry, sizeof(Data));
         // 建立内存索引
         index_.insert(std::make_pair(entry.keyword, offset));
         offset += sizeof(Data);
       }
+      lineStart = lineEnd + 1;
     }
 
     // 解除内存映射
@@ -205,10 +200,15 @@ public:
     outfile.close();
   }
 
-  // 判断这个Data entry是否是满足条件的 - hash到当前节点 status为1
-  bool filter(Data &entry) {
-    // TODO(scn): 这个为啥直接entry.status==1判断就有问题？？？
-    return (entry.status & 1) && (hash_(entry.keyword) == (node_id_ - 1));
+  // keyword是当前节点的
+  bool filterKeyword(uint64_t keyword) {
+    return hash_(keyword) == (node_id_ - 1);
+  }
+
+  // status状态活跃
+  bool filterStatus(int8_t status) {
+    // TODO(scn): 这个为啥直接status==1判断就有问题？？？
+    return (status & 1);
   }
 
   std::vector<Data> readAllFromDisk() {
@@ -231,7 +231,7 @@ public:
   }
 
 private:
-  void readCsvLine(const char *lineStart, int len, Data &entry) {
+  bool readCsvLine(const char *lineStart, int len, Data &entry) {
     std::string str(lineStart, len);
 
     std::istringstream lineStream(str);
@@ -242,12 +242,19 @@ private:
     uint64_t campaign_id, item_id;
 
     lineStream >> keyword;
+    // 直接返回不再解析
+    if (!filterKeyword(keyword)) {
+      return false;
+    }
     lineStream.ignore();
     lineStream >> adgroup_id;
     lineStream.ignore();
     lineStream >> keyword_prices;
     lineStream.ignore();
     lineStream >> status;
+    if (!filterStatus(status)) {
+      return false;
+    }
     lineStream.ignore();
     std::getline(lineStream, timings_str, '\t');
     lineStream >> vector_[0];
@@ -281,6 +288,8 @@ private:
     entry.vec2 = vector_[1];
     entry.campaign_id = campaign_id;
     entry.item_id = item_id;
+
+    return true;
   }
 
   // raw data filename

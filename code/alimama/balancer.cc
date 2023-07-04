@@ -31,23 +31,14 @@ class LoadBalancerImpl final : public SearchService::Service {
     std::string server_address = searchServerAddrs[i];
     i = (i + 1) % 3;
 
-    static uint64_t cnt = 0;
-    cnt++;
-    std::cout << "================== balancer send request" << cnt << " to "
-              << server_address << std::endl;
-
     std::unique_ptr<SearchService::Stub> stub(
         SearchService::NewStub(grpc::CreateChannel(
             server_address, grpc::InsecureChannelCredentials())));
 
     grpc::ClientContext client_context;
     auto status = stub->Search(&client_context, *request, response);
-    if (status.ok()) {
-      std::cout << "================== balancer receive response" << cnt
-                << " from " << server_address << " RPC ok" << std::endl;
-    } else {
-      std::cout << "================== balancer receive response" << cnt
-                << " from " << server_address << " RPC failed" << std::endl;
+    if (!status.ok()) {
+      std::cout << "balancer receive response RPC failed" << std::endl;
     }
     return status;
   }
