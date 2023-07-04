@@ -25,19 +25,32 @@ message Response {
   repeated uint64 prices = 2;
 }
 
+message AdgroupResp {
+  // 广告单元id
+  uint64 adgroup_id = 1;
+  // 预估点击率
+  float ctr = 2;
+  // 排序分数
+  float score = 3;
+  // 就是每个广告单元本身的出价，而不是最后排序后计算得来的计费价格
+  uint32 price = 4; // protobuf最小是uint32，虽然price是uint16
+}
+
 // SeachLocal返回的结果
-message Response2 {
-  repeated uint64 adgroup_ids = 1;
+// 每个keyword对应的topn+1(可能不到)个广告单元的结果
+message ResponseLocal {
+  repeated AdgroupResp array = 1;
 }
 
 /* 
 SearchLocal表示Request已经保证Requst是本地的了
 而使用Search则会将Request分成三份发给不同的server进行SearchLocal，然后收到回复后
 */
+
 service SearchService {
   rpc Search(Request) returns (Response) {}
 }
 
 service SearchLocalService {
-  rpc SearchLocal(Request) returns (Response) {}
+  rpc SearchLocal(Request) returns (ResponseLocal) {}
 }

@@ -19,7 +19,7 @@ extern IndexType kw2offset;
 
 struct Data;
 
-int hash(uint64_t keyword);
+int hashKeyword(uint64_t keyword);
 float GetCTR(const Data &data, float req_vec1, float req_vec2);
 float GetDataScore(const Data &data, float req_vec1, float req_vec2);
 
@@ -125,7 +125,7 @@ public:
   AlimamaCSVReader(std::string ifilename, std::string ofilename,
                    IndexType &index, HashFunc has, int node_id)
       : ifilename_(ifilename), ofilename_(ofilename), index_(index),
-        hash_(hash), node_id_(node_id) {}
+        hash_(hashKeyword), node_id_(node_id) {}
 
   // TODO(scn): 解析每一行的代码一定要效率高 这个函数要在10min内完成！
   // 这里大量的string生成和析构是否开销很大？能否弄个内存池复用 -

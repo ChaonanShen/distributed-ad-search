@@ -12,12 +12,12 @@
 void *fileData;
 IndexType kw2offset;
 
-int hash(uint64_t keyword) { return keyword % 3; }
+int hashKeyword(uint64_t keyword) { return keyword % 3; }
 
 // 读取csv数据(满足hash(x)==node_id-1的)，紧凑的保存，建立内存索引
 void prepareData(int node_id, IndexType &index, std::string ifilename,
                  std::string ofilename) {
-  AlimamaCSVReader reader(ifilename, ofilename, index, hash, node_id);
+  AlimamaCSVReader reader(ifilename, ofilename, index, hashKeyword, node_id);
   reader.readCsvAndSave();
 }
 
@@ -54,8 +54,8 @@ std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
     // 读出数据
     Data entry = *(Data *)((char *)fileData + offset);
     // 确保能读出正确的数据
-    // std::cout << "keyword: " << it->first << " offset: " << offset << std::endl;
-    // entry.print();
+    // std::cout << "keyword: " << it->first << " offset: " << offset <<
+    // std::endl; entry.print();
     if (filterHour(entry, hour)) { // 要时段匹配的
       topN.insert({entry, GetDataScore(entry, context_vec[0], context_vec[1])});
     }
