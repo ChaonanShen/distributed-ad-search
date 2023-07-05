@@ -4,7 +4,7 @@ SYSTEM ?= $(HOST_SYSTEM)
 CXX = g++
 CPPFLAGS += `pkg-config --cflags protobuf grpc`
 CXXFLAGS += -std=c++17
-# TODO(scn): 正式提交后去掉-g
+# TODO(scn): 正式提交后去掉-g 改为-O3
 CXXFLAGS += -O2 -g
 
 LDFLAGS += -L/usr/local/lib \

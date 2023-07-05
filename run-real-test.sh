@@ -21,6 +21,6 @@ cd `dirname $0`
 cp -rp build node-1
 cp -rp build node-2
 cp -rp build node-3 
-docker compose down -f docker-compose-real.yml
-docker compose up -d -f docker-compose-real.yml
+docker compose -f docker-compose-real.yml down 
+docker compose -f docker-compose-real.yml up -d 
 docker compose logs -f testbench

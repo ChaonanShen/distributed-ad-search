@@ -95,6 +95,7 @@ class SearchLocalServiceImpl final : public SearchLocalService::Service {
 
     // 反正各种关键词匹配到的广告都搜集起来，然后再合并选出topN的返回
     // 所以其实各个关键词只需要自己各自匹配topn个就够了
+    // 毕竟keywords可达上百个
     std::vector<DataScore> preResult;
     for (int i = 0; i < request->keywords().size(); i++) {
       uint64_t keyword = request->keywords(i);
