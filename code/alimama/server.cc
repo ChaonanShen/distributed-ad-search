@@ -160,6 +160,7 @@ struct LocalResult {
   }
 };
 
+std::unique_ptr<SearchLocalService::Stub> stubToSearchLocal[3];
 class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
   Status Search(ServerContext *context, const Request *request,
@@ -201,14 +202,14 @@ class SearchServiceImpl final : public SearchService::Service {
             req.set_topn(topn);
 
             ClientContext context;
-            auto remote_addr = getSearchLocalServerAddr(i);
-            std::unique_ptr<SearchLocalService::Stub> stub(
-                SearchLocalService::NewStub(grpc::CreateChannel(
-                    remote_addr, grpc::InsecureChannelCredentials())));
-            Status status = stub->SearchLocal(&context, req, &resp);
+            // TODO(scn)：原来Channel和stub可以不用每次生成的 - 长连接！
+            Status status =
+                stubToSearchLocal[i]->SearchLocal(&context, req, &resp);
             if (!status.ok()) {
+              // TODO(scn): 要判断下，失败是不是因为channel & stub失效了
+              // 目前好像就遇到过一次channel出错的
               std::cout << getCurrentSearchServerAddr() << " subrequest -> "
-                        << remote_addr << " SearchLocal RPC failed"
+                        << getSearchLocalServerAddr(i) << " SearchLocal RPC failed"
                         << std::endl;
             }
           },
@@ -374,6 +375,14 @@ void RunServers(int port) {
            searchLocalServersAddr[1]);
   splitStr(EtcdGetKVWait(etcd, "/node3"), searchServersAddr[2],
            searchLocalServersAddr[2]);
+
+  // 设置channel & stub - 长久的连接
+  stubToSearchLocal[0] = SearchLocalService::NewStub(grpc::CreateChannel(
+      getSearchLocalServerAddr(0), grpc::InsecureChannelCredentials()));
+  stubToSearchLocal[1] = SearchLocalService::NewStub(grpc::CreateChannel(
+      getSearchLocalServerAddr(1), grpc::InsecureChannelCredentials()));
+  stubToSearchLocal[2] = SearchLocalService::NewStub(grpc::CreateChannel(
+      getSearchLocalServerAddr(2), grpc::InsecureChannelCredentials()));
 
   t1.join();
   t2.join();
