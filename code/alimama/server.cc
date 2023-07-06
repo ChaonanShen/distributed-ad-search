@@ -79,6 +79,8 @@ struct LocalResult {
   }
 };
 
+std::unique_ptr<SearchService::Stub> stubs[3];
+
 class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
   Status Search(ServerContext *context, const Request *request,
@@ -98,10 +100,8 @@ class SearchServiceImpl final : public SearchService::Service {
           [](int i, const Request *request, ResponseLocal &resp) {
             ClientContext context;
             // TODO(scn)：原来Channel和stub可以不用每次生成的 - 长连接！
-            std::unique_ptr<SearchService::Stub> stub = SearchService::NewStub(
-                grpc::CreateChannel(getSearchServerAddr(i),
-                                    grpc::InsecureChannelCredentials()));
-            Status status = stub->SearchLocal(&context, *request, &resp);
+
+            Status status = stubs[i]->SearchLocal(&context, *request, &resp);
             if (!status.ok()) {
               // TODO(scn): 要判断下，失败是不是因为channel & stub失效了
               // 目前好像就遇到过一次channel出错的
@@ -286,6 +286,13 @@ void RunServer(int port) {
   serverAddr[0] = EtcdGetKVWait(etcd, "/node1");
   serverAddr[1] = EtcdGetKVWait(etcd, "/node2");
   serverAddr[2] = EtcdGetKVWait(etcd, "/node3");
+
+  stubs[0] = SearchService::NewStub(grpc::CreateChannel(
+      getSearchServerAddr(0), grpc::InsecureChannelCredentials()));
+  stubs[1] = SearchService::NewStub(grpc::CreateChannel(
+      getSearchServerAddr(1), grpc::InsecureChannelCredentials()));
+  stubs[2] = SearchService::NewStub(grpc::CreateChannel(
+      getSearchServerAddr(2), grpc::InsecureChannelCredentials()));
 
   std::cout << "Search Server listening on " << server_address << std::endl;
   server->Wait();
