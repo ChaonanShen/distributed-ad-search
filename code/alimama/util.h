@@ -27,12 +27,12 @@ void splitStr(std::string str, std::string &s1, std::string &s2);
 
 // 使用GCC/CLANG的__attribute__((packed))可以不进行对齐，但是性能会有影响，我这里还是先对齐吧
 // struct __attribute__((packed)) Data {
-struct Data {
-  uint64_t keyword;
+struct Data { // keyword直接保存在索引里，磁盘文件中不用再保存了
+  // uint64_t keyword;
   uint64_t adgroup_id;
 
-  uint64_t campaign_id;
-  uint64_t item_id;
+  // uint64_t campaign_id;
+  // uint64_t item_id;
 
   float vec1; // 确保sizeof(float) == 4!
   float vec2;
@@ -42,7 +42,7 @@ struct Data {
   int8_t status;
 
   void print() {
-    std::cout << "keyword " << keyword << std::endl;
+    // std::cout << "keyword " << keyword << std::endl;
     std::cout << "adgroup_id " << adgroup_id << std::endl;
     std::cout << "keyword prices " << keyword_prices << std::endl;
     std::cout << "status " << status << std::endl;
@@ -52,8 +52,8 @@ struct Data {
     }
     std::cout << std::endl;
     std::cout << "vectors " << vec1 << " " << vec2 << std::endl;
-    std::cout << "campaign_id " << campaign_id << std::endl;
-    std::cout << "item_id " << item_id << std::endl;
+    // std::cout << "campaign_id " << campaign_id << std::endl;
+    // std::cout << "item_id " << item_id << std::endl;
     std::cout << "========================" << std::endl;
   }
 
@@ -180,12 +180,14 @@ public:
       size_t len = lineEnd - lineStart;
 
       Data entry;
-      if (readCsvLine(lineStart, len, entry)) { // true才是满足条件的entry
+      uint64_t keyword;
+      if (readCsvLine(lineStart, len, entry, keyword)) {
+        // true才是满足条件的entry
         linecount++;
         // 直接用内存到磁盘数据的映射
         outfile.write((char *)&entry, sizeof(Data));
         // 建立内存索引
-        index_.insert(std::make_pair(entry.keyword, offset));
+        index_.insert(std::make_pair(keyword, offset));
         offset += sizeof(Data);
       }
       lineStart = lineEnd + 1;
@@ -233,11 +235,14 @@ public:
   }
 
 private:
-  bool readCsvLine(const char *lineStart, int len, Data &entry) {
+  bool readCsvLine(const char *lineStart, int len, Data &entry,
+                   uint64_t &keyword) {
     std::string str(lineStart, len);
 
     std::istringstream lineStream(str);
-    uint64_t keyword, adgroup_id, keyword_prices;
+    // uint64_t keyword, adgroup_id, keyword_prices;
+    uint64_t adgroup_id, keyword_prices;
+
     std::string timings_str;
     float vector_[2];
     int8_t status;
@@ -281,15 +286,15 @@ private:
     bytes[2] = value & 0xFF;
 
     // 从解析得到的数据构造 Data 结构体
-    entry.keyword = keyword;
+    // entry.keyword = keyword;
     entry.adgroup_id = adgroup_id;
     entry.keyword_prices = keyword_prices;
     entry.status = status;
     std::memcpy(entry.timings_hex, bytes, 3);
     entry.vec1 = vector_[0];
     entry.vec2 = vector_[1];
-    entry.campaign_id = campaign_id;
-    entry.item_id = item_id;
+    // entry.campaign_id = campaign_id;
+    // entry.item_id = item_id;
 
     return true;
   }
