@@ -99,7 +99,8 @@ class SearchLocalServiceImpl final : public SearchLocalService::Service {
     std::vector<DataScore> preResult;
     for (int i = 0; i < request->keywords().size(); i++) {
       uint64_t keyword = request->keywords(i);
-
+      if (kw2offset.find(keyword) == kw2offset.end())
+        continue;
       auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
       preResult.reserve(preResult.size() + vec.size());
       for (auto &ds : vec) {
@@ -165,19 +166,8 @@ class SearchServiceImpl final : public SearchService::Service {
   // 处理Request形成Response的函数
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
-    uint64_t hour = request->hour(), topn = request->topn();
-    float context_vec[2] = {request->context_vector(0),
-                            request->context_vector(1)};
-
-    std::vector<uint64_t> keywords[3]; // 分给三个server的
-    keywords[0].reserve(request->keywords().size());
-    keywords[1].reserve(request->keywords().size());
-    keywords[2].reserve(request->keywords().size());
-
-    for (int i = 0; i < request->keywords().size(); i++) {
-      uint64_t keyword = request->keywords(i);
-      keywords[hashKeyword(keyword)].push_back(keyword);
-    }
+    auto topn = request->topn();
+    // 傻了，不需要把Request分成三部分，直接发给各个节点即可，SearchLocal处理的时候遇到没有的keyword跳过即可
 
     ResponseLocal resp_local[3];
 
@@ -187,34 +177,21 @@ class SearchServiceImpl final : public SearchService::Service {
     for (int i = 0; i < 3; i++) {
       // 形成三个Request用SearchLocal分别调用三个server的rpc
       // TODO(scn): 引入线程池 - 通过性能瓶颈分析后决定是否进行
-      if (keywords[i].empty())
-        continue;
       threads.emplace_back(
-          [](int i, uint64_t hour, uint64_t topn, float context_vec[2],
-             const std::vector<uint64_t> &keywords, ResponseLocal &resp) {
-            Request req;
-
-            for (auto keyword : keywords)
-              req.add_keywords(keyword);
-            req.add_context_vector(context_vec[0]);
-            req.add_context_vector(context_vec[1]);
-            req.set_hour(hour);
-            req.set_topn(topn);
-
+          [](int i, const Request *request, ResponseLocal &resp) {
             ClientContext context;
             // TODO(scn)：原来Channel和stub可以不用每次生成的 - 长连接！
             Status status =
-                stubToSearchLocal[i]->SearchLocal(&context, req, &resp);
+                stubToSearchLocal[i]->SearchLocal(&context, *request, &resp);
             if (!status.ok()) {
               // TODO(scn): 要判断下，失败是不是因为channel & stub失效了
               // 目前好像就遇到过一次channel出错的
               std::cout << getCurrentSearchServerAddr() << " subrequest -> "
-                        << getSearchLocalServerAddr(i) << " SearchLocal RPC failed"
-                        << std::endl;
+                        << getSearchLocalServerAddr(i)
+                        << " SearchLocal RPC failed" << std::endl;
             }
           },
-          i, hour, topn, context_vec, std::cref(keywords[i]),
-          std::ref(resp_local[i]));
+          i, request, std::ref(resp_local[i]));
       // 线程中引用参数一定要用std::cref和std::ref传递，这个经常忘了
     }
 
