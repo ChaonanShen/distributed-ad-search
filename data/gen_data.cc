@@ -1,23 +1,25 @@
 #include <bits/stdc++.h>
 
 /**
+ * 最关键只是关键词(keyword)和广告单元id(adgroup_id)，这两个形成联合主键确定每一行
  * 生成100w个不同的keywords，生成500w个不同的广告单元id
- * 对每个广告单元id，随机挑选100个关键词，生成一条数据，其他信息都随意
+ * 对每个广告单元id，随机挑选120个关键词，生成一条数据，其他信息都随意，总共500w*120正好6亿行
  */
 
 const int million = 100 * 10000; // 100w
-
+const int keywordPerAd = 120;
 // 一个keyword & adgroup_id的组合
+// 500w个adgroup_id * 每个平均120个keyword
 std::vector<std::pair<uint64_t, uint64_t>> keyAndAdid;
 
-// 生成0~million之间随机的100个下标
+// 生成0~million之间随机的120个下标
 std::vector<uint64_t> genIndex() {
   std::random_device rd;
   std::mt19937_64 generator(rd());
 
   std::uniform_int_distribution<uint64_t> indexDist(0, million);
   std::unordered_set<uint64_t> indexes;
-  while (indexes.size() <= 100) {
+  while (indexes.size() < keywordPerAd) {
     indexes.insert(indexDist(generator));
   }
   std::vector<uint64_t> ret;
@@ -28,38 +30,69 @@ std::vector<uint64_t> genIndex() {
 void prepare() {
   std::random_device rd;
   std::mt19937_64 generator(rd());
-  std::uniform_int_distribution<uint64_t> keywordDist(1, 10000000000);
+
+  std::uniform_int_distribution<uint64_t> keywordDist(1, 10000000000000);
   std::uniform_int_distribution<uint64_t> adgroupIdDist(1, 10000000000000);
 
   std::unordered_set<uint64_t> keywordSet, adgroupIdSet;
   std::vector<uint64_t> keywordVec, adgroupIdVec;
 
-  while (keywordSet.size() <= million) {
-    keywordSet.insert(keywordDist(generator));
-  }
-  while (adgroupIdSet.size() <= 5 * million) {
-    adgroupIdSet.insert(adgroupIdDist(generator));
-  }
+  keywordSet.reserve(million);
+  adgroupIdSet.reserve(5 * million);
 
   keywordVec.reserve(million);
   adgroupIdVec.reserve(5 * million);
 
+  while (keywordSet.size() < million) {
+    keywordSet.insert(keywordDist(generator));
+  }
+  while (adgroupIdSet.size() < 5 * million) {
+    adgroupIdSet.insert(adgroupIdDist(generator));
+  }
+
   keywordVec.assign(keywordSet.begin(), keywordSet.end());
   adgroupIdVec.assign(adgroupIdSet.begin(), adgroupIdSet.end());
 
-  size_t n = 50000;
-  n *= million;
+  keyAndAdid.reserve(adgroupIdVec.size() * keywordPerAd);
+
   for (int i = 0; i < adgroupIdVec.size(); i++) {
-    // 随机抽取100个keywordVec中的keywords
+    // 随机抽取120个keywordVec中的keywords
     auto adgroup_id = adgroupIdVec[i];
     auto indexes = genIndex();
-    for (auto keyword : indexes) {
-      keyAndAdid.emplace_back(std::make_pair(keyword, adgroup_id));
+    for (auto index : indexes) {
+      keyAndAdid.emplace_back(std::make_pair(keywordVec[index], adgroup_id));
     }
   }
 
   std::random_shuffle(keyAndAdid.begin(), keyAndAdid.end());
   std::random_shuffle(keyAndAdid.begin(), keyAndAdid.end());
+
+  // 将keywords也都记录下
+  std::string keywordFile[3] = {"keyword0.txt", "keyword1.txt", "keyword2.txt"};
+  std::ofstream file0(keywordFile[0]), file1(keywordFile[1]),
+      file2(keywordFile[2]);
+  if (!file0 || !file1 || !file2) {
+    std::cerr << "无法打开keywordFile文件" << std::endl;
+    return;
+  }
+
+  for (auto key : keywordVec) {
+    switch (key % 3) {
+    case 0:
+      file0 << key << "\n";
+      break;
+    case 1:
+      file1 << key << "\n";
+      break;
+    case 2:
+      file2 << key << "\n";
+      break;
+    }
+  }
+
+  file0.close();
+  file1.close();
+  file2.close();
 }
 
 void generateDataFile(const std::string &filename) {
@@ -78,9 +111,6 @@ void generateDataFile(const std::string &filename) {
   std::uniform_real_distribution<float> vectorDist(0.0, 1.0);
   std::uniform_int_distribution<uint64_t> campaignIdDist(1, 1000000000);
   std::uniform_int_distribution<uint64_t> itemIdDist(1, 10000000000000);
-
-  // TODO(scn):
-  // 我这样子生成相当于关键字都排过序了，但是实际上目前数据是未排序过的
 
   size_t cnt = 0;
   for (auto it : keyAndAdid) {
@@ -124,7 +154,7 @@ void generateDataFile(const std::string &filename) {
 int main() {
   std::string filename = "real_data.csv";
   prepare();
-  std::cout << "prepare done" << std::end;
+  std::cout << "prepare done" << std::endl;
   generateDataFile(filename);
 
   return 0;

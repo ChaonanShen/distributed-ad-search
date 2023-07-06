@@ -25,6 +25,9 @@ static std::string searchServerAddrs[3];
 // 创建一个etcd客户端
 etcd::Client etcd_client("http://etcd:2379");
 
+// 一个stub&channel背后其实有很多物理连接
+std::vector<std::unique_ptr<SearchService::Stub>> stubs;
+
 class LoadBalancerImpl final : public SearchService::Service {
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
@@ -33,10 +36,7 @@ class LoadBalancerImpl final : public SearchService::Service {
     i = (i + 1) % 3;
 
     grpc::ClientContext client_context;
-    std::unique_ptr<SearchService::Stub> stub =
-        SearchService::NewStub(grpc::CreateChannel(
-            searchServerAddrs[i], grpc::InsecureChannelCredentials()));
-    auto status = stub->Search(&client_context, *request, response);
+    auto status = stubs[i]->Search(&client_context, *request, response);
     if (!status.ok()) {
       // TODO(scn): 如果检测到是channel状态出问题，就重新更换！
       // 目前好像就遇到过一次channel出错的
@@ -55,6 +55,12 @@ void prepare() {
            dummy_str);
   splitStr(EtcdGetKVWait(etcd_client, "/node3"), searchServerAddrs[2],
            dummy_str);
+
+  for (int i = 0; i < 3; i++) {
+    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(
+        searchServerAddrs[i], grpc::InsecureChannelCredentials());
+    stubs.emplace_back(SearchService::NewStub(channel));
+  }
 }
 
 void RunLoadBalancer() {
