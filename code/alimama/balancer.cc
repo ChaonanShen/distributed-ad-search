@@ -21,7 +21,6 @@ using alimama::proto::SearchService;
 
 // server1 ip1:50051 server2 ip2:50052 server3 ip3:50053
 static std::string searchServerAddrs[3];
-static std::unique_ptr<SearchService::Stub> stubs[3];
 
 // 创建一个etcd客户端
 etcd::Client etcd_client("http://etcd:2379");
@@ -34,9 +33,13 @@ class LoadBalancerImpl final : public SearchService::Service {
     i = (i + 1) % 3;
 
     grpc::ClientContext client_context;
-    auto status = stubs[i]->Search(&client_context, *request, response);
+    std::unique_ptr<SearchService::Stub> stub =
+        SearchService::NewStub(grpc::CreateChannel(
+            searchServerAddrs[i], grpc::InsecureChannelCredentials()));
+    auto status = stub->Search(&client_context, *request, response);
     if (!status.ok()) {
       // TODO(scn): 如果检测到是channel状态出问题，就重新更换！
+      // 目前好像就遇到过一次channel出错的
       std::cout << "balancer receive response RPC Failed" << std::endl;
     }
     return status;
@@ -52,14 +55,6 @@ void prepare() {
            dummy_str);
   splitStr(EtcdGetKVWait(etcd_client, "/node3"), searchServerAddrs[2],
            dummy_str);
-
-  // rpc一直复用一个连接，不需要每次都生成！
-  stubs[0] = SearchService::NewStub(grpc::CreateChannel(
-      searchServerAddrs[0], grpc::InsecureChannelCredentials()));
-  stubs[1] = SearchService::NewStub(grpc::CreateChannel(
-      searchServerAddrs[1], grpc::InsecureChannelCredentials()));
-  stubs[2] = SearchService::NewStub(grpc::CreateChannel(
-      searchServerAddrs[2], grpc::InsecureChannelCredentials()));
 }
 
 void RunLoadBalancer() {
