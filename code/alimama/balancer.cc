@@ -49,12 +49,10 @@ class LoadBalancerImpl final : public SearchService::Service {
 void prepare() {
   // 等待三个server将数据都准备好
   std::string dummy_str;
-  splitStr(EtcdGetKVWait(etcd_client, "/node1"), searchServerAddrs[0],
-           dummy_str);
-  splitStr(EtcdGetKVWait(etcd_client, "/node2"), searchServerAddrs[1],
-           dummy_str);
-  splitStr(EtcdGetKVWait(etcd_client, "/node3"), searchServerAddrs[2],
-           dummy_str);
+  searchServerAddrs[0] = EtcdGetKVWait(etcd_client, "/node1");
+  searchServerAddrs[1] = EtcdGetKVWait(etcd_client, "/node2");
+  searchServerAddrs[2] = EtcdGetKVWait(etcd_client, "/node3");
+
 
   for (int i = 0; i < 3; i++) {
     std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(

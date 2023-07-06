@@ -14,11 +14,7 @@
 #include <etcd/Client.hpp>
 #include <etcd/Response.hpp>
 
-// #ifdef BAZEL_BUILD
-// #include "examples/protos/alimama.grpc.pb.h"
-// #else
 #include "alimama.grpc.pb.h"
-// #endif
 
 using grpc::ClientContext;
 using grpc::Server;
@@ -31,33 +27,22 @@ using alimama::proto::AdgroupResp;
 using alimama::proto::Request;
 using alimama::proto::Response;
 using alimama::proto::ResponseLocal;
-using alimama::proto::SearchLocalService;
 using alimama::proto::SearchService;
 
 #include "util.h"
 
 // Search Servers的ports
 static const int PORTS[3] = {50051, 50052, 50053};
-// SearchLocal Servers的ports
-static const int PORTS2[3] = {50061, 50062, 50063};
 
 static int port = -1;
 static int NODE_ID = 1;
 // 其他
-static std::string searchServersAddr[3];
-static std::string searchLocalServersAddr[3];
+static std::string serverAddr[3];
 
-static std::string getCurrentSearchServerAddr() {
+static std::string getCurrentServerAddr() {
   return getLocalIP() + ":" + std::to_string(port);
 }
-
-static std::string getCurrentSearchLocalServerAddr() {
-  return getLocalIP() + ":" + std::to_string(port + 10);
-}
-
-static std::string getSearchLocalServerAddr(int index) {
-  return searchLocalServersAddr[index];
-}
+static std::string getSearchServerAddr(int index) { return serverAddr[index]; }
 
 // mmap文件指针
 extern void *fileData;
@@ -72,82 +57,15 @@ auto floatEqual = [](float f1, float f2) -> bool {
 };
 
 /**
- * 两个server
- * SearchService将Request分割发给不同servers，然后再合起来，排序返回
- * SearchLocalService收到的Request里面keyword一定在本地，返回个map，里面是不同广告单元(相当于是每个keyword的广告)以及之后排序需要的信息
+ * 吃了没怎么学grpc的亏，两个rpc服务在一个server中就能运行，不需要搞两套
+ * Search将Request发给三个节点(使用SearchLocal方法)，SearchLocal就只需要查找本地有的那些keywords，找出最多topn+1个返回
+ * 最终Search里将三个节点返回的合并选出最后topn
  * TODO(scn): 一个权衡 - 是rpc请求/回复中字段多一些 还是 本地查询更多一些
- * 就是网络带宽和本地磁盘带宽的比拼
+ * 就是网络带宽和本地磁盘带宽的比拼 -
+ * 尤其如果之后索引能直接保存很多数据的话，那rpc(LocalResult)少带点信息就行
  * 目前我选择SearchLocal将返回所有最终排序里所需要的内容
  * SearchLocal返回各个keywords排名topn+1的字段
  */
-
-class SearchLocalServiceImpl final : public SearchLocalService::Service {
-  // 处理确保所有Request中的keyword一定在本地存在
-  // 需要返回的是topn+1的keyword+排序分数
-  Status SearchLocal(ServerContext *context, const Request *request,
-                     ResponseLocal *response) override {
-    // 已经确保所有Request中的keywords都是在本地
-    uint64_t hour = request->hour(), topn = request->topn();
-    float context_vec[2] = {request->context_vector(0),
-                            request->context_vector(1)};
-
-    // TODO(scn): 多个关键词甚至可以并行执行，反正都是只读的！
-
-    // 反正各种关键词匹配到的广告都搜集起来，然后再合并选出topN的返回
-    // 所以其实各个关键词只需要自己各自匹配topn个就够了
-    // 毕竟keywords可达上百个
-    std::vector<DataScore> preResult;
-    for (int i = 0; i < request->keywords().size(); i++) {
-      uint64_t keyword = request->keywords(i);
-      if (kw2offset.find(keyword) == kw2offset.end())
-        continue;
-      auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
-      preResult.reserve(preResult.size() + vec.size());
-      for (auto &ds : vec) {
-        preResult.emplace_back(ds);
-      }
-    }
-
-    // 先按照分数排序
-    std::sort(preResult.begin(), preResult.end(),
-              [](const DataScore &ds1, const DataScore &ds2) {
-                // 排序分数高的在前 -> 排序分数相同则出价低的在前 ->
-                // 否则adgroup_id大的在前
-                if (!floatEqual(ds1.score, ds2.score))
-                  return ds1.score > ds2.score;
-                else if (ds1.data.keyword_prices != ds2.data.keyword_prices)
-                  return ds1.data.keyword_prices < ds2.data.keyword_prices;
-                else
-                  return ds1.data.adgroup_id > ds2.data.adgroup_id;
-              });
-
-    // 从preResult中选出topN - 要去重
-    std::vector<DataScore> result;
-    result.reserve(topn + 1);
-
-    std::set<uint64_t> exist_adgroup_ids;
-    int count = 0;
-    for (int i = 0; i < preResult.size() && count < topn + 1; i++) {
-      const DataScore &ds = preResult[i];
-      if (!exist_adgroup_ids.count(ds.data.adgroup_id)) {
-        // 没有重复的广告单元
-        exist_adgroup_ids.insert(ds.data.adgroup_id);
-        count++;
-        result.push_back(ds);
-      }
-    }
-
-    // 不用再计算最后的出价，直接把result排序号的最多topn+1个元素返回过去
-    for (auto res : result) {
-      AdgroupResp *adgroup_resp = response->add_array();
-      adgroup_resp->set_adgroup_id(res.data.adgroup_id);
-      adgroup_resp->set_ctr(GetCTR(res.data, context_vec[0], context_vec[1]));
-      adgroup_resp->set_score(res.score);
-      adgroup_resp->set_price(res.data.keyword_prices);
-    }
-    return Status::OK;
-  }
-};
 
 // SearchLocal返回的结果
 struct LocalResult {
@@ -180,17 +98,16 @@ class SearchServiceImpl final : public SearchService::Service {
           [](int i, const Request *request, ResponseLocal &resp) {
             ClientContext context;
             // TODO(scn)：原来Channel和stub可以不用每次生成的 - 长连接！
-            std::unique_ptr<SearchLocalService::Stub> stub =
-                SearchLocalService::NewStub(
-                    grpc::CreateChannel(getSearchLocalServerAddr(i),
-                                        grpc::InsecureChannelCredentials()));
+            std::unique_ptr<SearchService::Stub> stub = SearchService::NewStub(
+                grpc::CreateChannel(getSearchServerAddr(i),
+                                    grpc::InsecureChannelCredentials()));
             Status status = stub->SearchLocal(&context, *request, &resp);
             if (!status.ok()) {
               // TODO(scn): 要判断下，失败是不是因为channel & stub失效了
               // 目前好像就遇到过一次channel出错的
-              std::cout << getCurrentSearchServerAddr() << " subrequest -> "
-                        << getSearchLocalServerAddr(i)
-                        << " SearchLocal RPC failed" << std::endl;
+              std::cout << getCurrentServerAddr() << " subrequest -> "
+                        << getSearchServerAddr(i) << " SearchLocal RPC failed"
+                        << std::endl;
             }
           },
           i, request, std::ref(resp_local[i]));
@@ -282,81 +199,96 @@ class SearchServiceImpl final : public SearchService::Service {
 
     return Status::OK;
   }
+
+  // 需要返回的是topn+1的keyword+排序分数
+  Status SearchLocal(ServerContext *context, const Request *request,
+                     ResponseLocal *response) override {
+    // 不再本地的keywords直接跳过
+    uint64_t hour = request->hour(), topn = request->topn();
+    float context_vec[2] = {request->context_vector(0),
+                            request->context_vector(1)};
+
+    // TODO(scn): 多个关键词甚至可以并行执行，反正都是只读的！
+
+    // 反正各种关键词匹配到的广告都搜集起来，然后再合并选出topN的返回
+    // 所以其实各个关键词只需要自己各自匹配topn个就够了
+    // 毕竟keywords可达上百个
+    std::vector<DataScore> preResult;
+    for (int i = 0; i < request->keywords().size(); i++) {
+      uint64_t keyword = request->keywords(i);
+      if (kw2offset.find(keyword) == kw2offset.end())
+        continue;
+      auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
+      preResult.reserve(preResult.size() + vec.size());
+      for (auto &ds : vec) {
+        preResult.emplace_back(ds);
+      }
+    }
+
+    // 先按照分数排序
+    std::sort(preResult.begin(), preResult.end(),
+              [](const DataScore &ds1, const DataScore &ds2) {
+                // 排序分数高的在前 -> 排序分数相同则出价低的在前 ->
+                // 否则adgroup_id大的在前
+                if (!floatEqual(ds1.score, ds2.score))
+                  return ds1.score > ds2.score;
+                else if (ds1.data.keyword_prices != ds2.data.keyword_prices)
+                  return ds1.data.keyword_prices < ds2.data.keyword_prices;
+                else
+                  return ds1.data.adgroup_id > ds2.data.adgroup_id;
+              });
+
+    // 从preResult中选出topN - 要去重
+    std::vector<DataScore> result;
+    result.reserve(topn + 1);
+
+    std::set<uint64_t> exist_adgroup_ids;
+    int count = 0;
+    for (int i = 0; i < preResult.size() && count < topn + 1; i++) {
+      const DataScore &ds = preResult[i];
+      if (!exist_adgroup_ids.count(ds.data.adgroup_id)) {
+        // 没有重复的广告单元
+        exist_adgroup_ids.insert(ds.data.adgroup_id);
+        count++;
+        result.push_back(ds);
+      }
+    }
+
+    // 不用再计算最后的出价，直接把result排序号的最多topn+1个元素返回过去
+    for (auto res : result) {
+      AdgroupResp *adgroup_resp = response->add_array();
+      adgroup_resp->set_adgroup_id(res.data.adgroup_id);
+      adgroup_resp->set_ctr(GetCTR(res.data, context_vec[0], context_vec[1]));
+      adgroup_resp->set_score(res.score);
+      adgroup_resp->set_price(res.data.keyword_prices);
+    }
+    return Status::OK;
+  }
 };
 
-void RunServers(int port) {
-  sem_t sem;
-  sem_init(&sem, 0, 0);
+void RunServer(int port) {
+  std::string server_address = getCurrentServerAddr();
+  SearchServiceImpl service;
+  ServerBuilder builder;
+  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+  builder.RegisterService(&service);
 
-  // 运行两个rpc server - t1是会split
-  // Request然后分发给不同server的，t2是确保Request一定都是本地的keywords的
-  std::thread t1(
-      [port](sem_t *sem) {
-        std::string server_address = getCurrentSearchServerAddr();
-
-        SearchServiceImpl service;
-        ServerBuilder builder;
-        builder.AddListeningPort(server_address,
-                                 grpc::InsecureServerCredentials());
-        builder.RegisterService(&service);
-
-        std::unique_ptr<Server> server(builder.BuildAndStart());
-
-        std::cout << "Search Server listening on " << server_address
-                  << std::endl;
-
-        // 信号量同步点，也就是说线程中执行到这个位置，RunServers才能继续
-        sem_post(sem);
-
-        server->Wait();
-      },
-      &sem);
-
-  std::thread t2(
-      [port](sem_t *sem) {
-        std::string server_address = getCurrentSearchLocalServerAddr();
-
-        SearchLocalServiceImpl service;
-        ServerBuilder builder;
-        builder.AddListeningPort(server_address,
-                                 grpc::InsecureServerCredentials());
-        builder.RegisterService(&service);
-
-        std::unique_ptr<Server> server(builder.BuildAndStart());
-
-        std::cout << "SearchLocal Server listening on " << server_address
-                  << std::endl;
-
-        // 信号量同步点，也就是说线程中执行到这个位置，RunServers才能继续
-        sem_post(sem);
-
-        server->Wait();
-      },
-      &sem);
-
-  // 同步点：等两个线程都执行到同步位置才能继续进行注册
-  sem_wait(&sem);
-  sem_wait(&sem);
+  std::unique_ptr<Server> server(builder.BuildAndStart());
 
   // server运行起来，可以注册了
   // 创建一个etcd客户端
   etcd::Client etcd("http://etcd:2379");
   std::string key = "/node" + std::to_string(NODE_ID);
-  EtcdSetKV(etcd, key,
-            getCurrentSearchServerAddr() + " " +
-                getCurrentSearchLocalServerAddr());
+  EtcdSetKV(etcd, key, getCurrentServerAddr());
 
   std::cout << "server-" << port << " registeration success" << std::endl;
 
-  splitStr(EtcdGetKVWait(etcd, "/node1"), searchServersAddr[0],
-           searchLocalServersAddr[0]);
-  splitStr(EtcdGetKVWait(etcd, "/node2"), searchServersAddr[1],
-           searchLocalServersAddr[1]);
-  splitStr(EtcdGetKVWait(etcd, "/node3"), searchServersAddr[2],
-           searchLocalServersAddr[2]);
+  serverAddr[0] = EtcdGetKVWait(etcd, "/node1");
+  serverAddr[1] = EtcdGetKVWait(etcd, "/node2");
+  serverAddr[2] = EtcdGetKVWait(etcd, "/node3");
 
-  t1.join();
-  t2.join();
+  std::cout << "Search Server listening on " << server_address << std::endl;
+  server->Wait();
 }
 
 int main(int argc, char **argv) {
@@ -402,7 +334,7 @@ int main(int argc, char **argv) {
   }
 
   // 运行server，接受请求
-  RunServers(port);
+  RunServer(port);
 
   return 0;
 }

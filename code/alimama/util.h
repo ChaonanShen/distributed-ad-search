@@ -23,8 +23,6 @@ int hashKeyword(uint64_t keyword);
 float GetCTR(const Data &data, float req_vec1, float req_vec2);
 float GetDataScore(const Data &data, float req_vec1, float req_vec2);
 
-void splitStr(std::string str, std::string &s1, std::string &s2);
-
 // 使用GCC/CLANG的__attribute__((packed))可以不进行对齐，但是性能会有影响，我这里还是先对齐吧
 // struct __attribute__((packed)) Data {
 struct Data { // keyword直接保存在索引里，磁盘文件中不用再保存了

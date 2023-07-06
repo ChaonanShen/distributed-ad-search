@@ -49,8 +49,5 @@ SearchLocal表示Request已经保证Requst是本地的了
 
 service SearchService {
   rpc Search(Request) returns (Response) {}
-}
-
-service SearchLocalService {
   rpc SearchLocal(Request) returns (ResponseLocal) {}
 }
