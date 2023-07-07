@@ -40,7 +40,7 @@ local_client: alimama.pb.o alimama.grpc.pb.o local_client.o util.o
 client: alimama.pb.o alimama.grpc.pb.o client.o util.o
 	$(CXX) $^ $(LDFLAGS) -o $@
 
-server: alimama.pb.o alimama.grpc.pb.o server.o util.o
+server: alimama.pb.o alimama.grpc.pb.o server.o util.o async_server.h
 	$(CXX) $^ $(LDFLAGS) -o $@
 
 balancer: alimama.pb.o alimama.grpc.pb.o balancer.o util.o

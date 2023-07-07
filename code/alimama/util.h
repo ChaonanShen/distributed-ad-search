@@ -10,6 +10,8 @@
 #include <etcd/Client.hpp>
 #include <etcd/Response.hpp>
 
+#define RUN_REMOTE 1
+
 // keyword -> 文件中offset
 using IndexType = std::unordered_multimap<uint64_t, uint64_t>;
 

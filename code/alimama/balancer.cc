@@ -22,8 +22,10 @@ using alimama::proto::SearchService;
 // server1 ip1:50051 server2 ip2:50052 server3 ip3:50053
 static std::string searchServerAddrs[3];
 
+#if RUN_REMOTE
 // 创建一个etcd客户端
 etcd::Client etcd_client("http://etcd:2379");
+#endif
 
 // 一个stub&channel背后其实有很多物理连接
 std::vector<std::unique_ptr<SearchService::Stub>> stubs;
@@ -41,25 +43,12 @@ class LoadBalancerImpl final : public SearchService::Service {
       // TODO(scn): 如果检测到是channel状态出问题，就重新更换！
       // 目前好像就遇到过一次channel出错的
       std::cout << "balancer receive response RPC Failed" << std::endl;
+    } else {
+      std::cout << "balancer receive response RPC Success" << std::endl;
     }
     return status;
   }
 };
-
-void prepare() {
-  // 等待三个server将数据都准备好
-  std::string dummy_str;
-  searchServerAddrs[0] = EtcdGetKVWait(etcd_client, "/node1");
-  searchServerAddrs[1] = EtcdGetKVWait(etcd_client, "/node2");
-  searchServerAddrs[2] = EtcdGetKVWait(etcd_client, "/node3");
-
-
-  for (int i = 0; i < 3; i++) {
-    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(
-        searchServerAddrs[i], grpc::InsecureChannelCredentials());
-    stubs.emplace_back(SearchService::NewStub(channel));
-  }
-}
 
 void RunLoadBalancer() {
   std::string local_ip = getLocalIP();
@@ -78,6 +67,7 @@ void RunLoadBalancer() {
 
   std::unique_ptr<Server> server(builder.BuildAndStart());
 
+#if RUN_REMOTE
   // 将服务地址注册到etcd中
   // 相当于 etcdctl put /services/searchservice ip:port
   std::string key = std::string("/services/searchservice");
@@ -88,13 +78,31 @@ void RunLoadBalancer() {
     std::cerr << "Service registration failed: " << response.error_message()
               << "\n";
   }
+#endif
 
   std::cout << "Balancer listening on " << server_address << std::endl;
   server->Wait();
 }
 
 int main() {
-  prepare();
+#if RUN_REMOTE
+  // 等待三个server将数据都准备好
+  searchServerAddrs[0] = EtcdGetKVWait(etcd_client, "/node1");
+  searchServerAddrs[1] = EtcdGetKVWait(etcd_client, "/node2");
+  searchServerAddrs[2] = EtcdGetKVWait(etcd_client, "/node3");
+#endif
+
+  for (int i = 0; i < 3; i++) {
+    std::cout << "balancer found server" << i << " " << searchServerAddrs[i]
+              << std::endl;
+  }
+
+  for (int i = 0; i < 3; i++) {
+    std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(
+        searchServerAddrs[i], grpc::InsecureChannelCredentials());
+    stubs.emplace_back(SearchService::NewStub(channel));
+  }
+
   RunLoadBalancer();
 
   return 0;
