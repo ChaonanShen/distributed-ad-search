@@ -159,66 +159,33 @@ int main(int argc, char **argv) {
   return 0;
 }
 
+ThreadPool pool(9);
 
 void doSearch(const Request *request, Response *response) {
-  std::cout << "doSearch" << std::endl;
-
   auto topn = request->topn();
 
   ResponseLocal resp_local[3];
 
-  std::vector<std::thread> threads;
-  threads.reserve(3);
+  std::vector<std::future<void>> futures;
+  futures.reserve(3);
 
   for (int i = 0; i < 3; i++) {
-    // 形成三个Request用SearchLocal分别调用三个server的rpc
-    // TODO(scn): 引入线程池 - 通过性能瓶颈分析后决定是否进行
-    threads.emplace_back(
+    futures.push_back(pool.enqueue(
         [](int i, const Request *request, ResponseLocal &resp) {
           ClientContext context;
-          // TODO(scn)：原来Channel和stub可以不用每次生成的 - 长连接！
-
           Status status = stubs[i]->SearchLocal(&context, *request, &resp);
           if (!status.ok()) {
-            // TODO(scn): 要判断下，失败是不是因为channel & stub失效了
-            // 目前好像就遇到过一次channel出错的
             std::cout << getCurrentServerAddr() << " subrequest -> "
                       << getSearchServerAddr(i) << " SearchLocal RPC failed"
                       << std::endl;
-          } else {
-            std::cout << getCurrentServerAddr() << " subrequest -> "
-                      << getSearchServerAddr(i) << " SearchLocal RPC ok"
-                      << std::endl;
           }
         },
-        i, request, std::ref(resp_local[i]));
-    // 线程中引用参数一定要用std::cref和std::ref传递，这个经常忘了
+        i, request, std::ref(resp_local[i])));
   }
 
-  // TODO(scn): 阻塞在这里，我怀疑是因为这里是同步等待
-  for (auto &t : threads) {
-    std::cout << "join one thread" << std::endl;
-    t.join();
+  for (auto &future : futures) {
+    future.get();
   }
-
-  // 暂时不用线程，直接同步操作
-  // for (int i = 0; i < 3; i++) {
-  //   ClientContext context;
-  //   Status status = stubs[i]->SearchLocal(&context, *request,
-  //   &resp_local[i]);
-
-  //   if (!status.ok()) {
-  //     // TODO(scn): 要判断下，失败是不是因为channel & stub失效了
-  //     // 目前好像就遇到过一次channel出错的
-  //     std::cout << getCurrentServerAddr() << " subrequest -> "
-  //               << getSearchServerAddr(i) << " SearchLocal RPC failed "
-  //               << std::endl;
-  //   } else {
-  //     std::cout << getCurrentServerAddr() << " subrequest -> "
-  //               << getSearchServerAddr(i) << " SearchLocal RPC ok" <<
-  //               std::endl;
-  //   }
-  // }
 
   std::vector<LocalResult> result;
   std::vector<float> prices;
@@ -274,8 +241,7 @@ void doSearch(const Request *request, Response *response) {
   prices.resize(result.size());
   if (!prices.empty()) {
     if (result.size() <= topn) {
-      //
-若召回的广告集合少于等于请求的topn时，最后一名的计费价格使用其自身的出价
+      // 若召回的广告集合少于等于请求的topn时，最后一名的计费价格使用其自身的出价
       prices.back() = result.back().price;
     } else {
       assert(result.size() == topn + 1);
@@ -301,10 +267,7 @@ void doSearch(const Request *request, Response *response) {
   }
 }
 
-
 void doSearchLocal(const Request *request, ResponseLocal *response) {
-  std::cout << "doSearchLocal" << std::endl;
-
   // 不在本地的keywords直接跳过
   uint64_t hour = request->hour(), topn = request->topn();
   float context_vec[2] = {request->context_vector(0),

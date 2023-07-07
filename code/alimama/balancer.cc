@@ -43,8 +43,6 @@ class LoadBalancerImpl final : public SearchService::Service {
       // TODO(scn): 如果检测到是channel状态出问题，就重新更换！
       // 目前好像就遇到过一次channel出错的
       std::cout << "balancer receive response RPC Failed" << std::endl;
-    } else {
-      std::cout << "balancer receive response RPC Success" << std::endl;
     }
     return status;
   }

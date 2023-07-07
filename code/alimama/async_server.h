@@ -28,18 +28,38 @@ public:
     ServerBuilder builder;
     builder.AddListeningPort(server_addr, grpc::InsecureServerCredentials());
     builder.RegisterService(&service_);
-    cq_ = builder.AddCompletionQueue();
+
+    // 因为Search rpc会调用SearchLocal rpc,共用一个cq可能会死锁!
+    cq1_ = builder.AddCompletionQueue();
+    cq2_ = builder.AddCompletionQueue();
+
     server_ = builder.BuildAndStart();
 
     std::cout << "Server listening on " << server_addr << std::endl;
 
+    // 可以只用一个HandleRpcs(),也可以用多个,反正CompletionQueue是并发安全的
     // 处理从cq中获得的事件
-    HandleRpcs();
+
+    // HandleCallSearch和HandleCallSearchLocal比例是1:3
+    std::vector<std::thread> threads;
+    const int num_search_threads = 2;
+    for (int i = 0; i < num_search_threads; i++) {
+      threads.push_back(
+          std::thread(std::bind(&AsyncServerImpl::HandleCallSearch, this)));
+    }
+    for (int i = 0; i < num_search_threads * 3; i++) {
+      threads.push_back(std::thread(
+          std::bind(&AsyncServerImpl::HandleCallSearchLocal, this)));
+    }
+    for (auto &th : threads) {
+      th.join();
+    }
   }
 
   ~AsyncServerImpl() {
     server_->Shutdown();
-    cq_->Shutdown();
+    cq1_->Shutdown();
+    cq2_->Shutdown();
   }
 
 private:
@@ -66,22 +86,16 @@ private:
 
     void Proceed() override {
       if (status_ == CREATE) {
-        std::cout << "CallSearch - Proceed CREATE" << std::endl;
-
         status_ = PROCESS;
         service_->RequestSearch(&ctx_, &request_, &responder_, cq_, cq_, this);
       } else if (status_ == PROCESS) {
         // 准备处理当前事件，新生成一个对象，接收新的请求
         new CallSearch(service_, cq_);
-
-        std::cout << "CallSearch - Proceed PROCESS" << std::endl;
         // 正式操作，生成Response
         doSearch(&request_, &reply_);
         status_ = FINISH;
         responder_.Finish(reply_, Status::OK, this);
       } else {
-        std::cout << "CallSearch - Proceed FINISH" << std::endl;
-
         GPR_ASSERT(status_ == FINISH);
         delete this;
       }
@@ -107,43 +121,52 @@ private:
 
     void Proceed() override {
       if (status_ == CREATE) {
-        std::cout << "CallSearchLocal - Proceed CREATE" << std::endl;
-
         status_ = PROCESS;
         service_->RequestSearchLocal(&ctx_, &request_, &responder_, cq_, cq_,
                                      this);
       } else if (status_ == PROCESS) {
         // 准备处理当前事件，新生成一个对象，接收新的请求
         new CallSearchLocal(service_, cq_);
-
-        std::cout << "CallSearchLocal - Proceed PROCESS" << std::endl;
         // 正式操作，生成Response
         doSearchLocal(&request_, &reply_);
         status_ = FINISH;
         responder_.Finish(reply_, Status::OK, this);
       } else {
-        std::cout << "CallSearchLocal - Proceed FINISH" << std::endl;
-
         GPR_ASSERT(status_ == FINISH);
         delete this;
       }
     }
   };
 
-  void HandleRpcs() {
-    new CallSearch(&service_, cq_.get());
-    new CallSearchLocal(&service_, cq_.get());
-    void *tag;
-    bool ok;
-    while (true) {
-      GPR_ASSERT(cq_->Next(&tag, &ok));
-      GPR_ASSERT(ok);
-      static_cast<CallBase *>(tag)->Proceed();
-      std::cout << "HandleRpcs process one request" << std::endl;
-    }
+  void HandleCallSearch() {
+    new CallSearch(&service_, cq1_.get());
+    std::thread t([this]() {
+      void *tag;
+      bool ok;
+      while (true) {
+        GPR_ASSERT(cq1_->Next(&tag, &ok));
+        GPR_ASSERT(ok);
+        static_cast<CallSearch *>(tag)->Proceed();
+      }
+    });
+    t.join();
   }
 
-  std::unique_ptr<ServerCompletionQueue> cq_;
+  void HandleCallSearchLocal() {
+    new CallSearchLocal(&service_, cq2_.get());
+    std::thread t([this]() {
+      void *tag;
+      bool ok;
+      while (true) {
+        GPR_ASSERT(cq2_->Next(&tag, &ok));
+        GPR_ASSERT(ok);
+        static_cast<CallSearchLocal *>(tag)->Proceed();
+      }
+    });
+    t.join();
+  }
+
+  std::unique_ptr<ServerCompletionQueue> cq1_, cq2_;
   SearchService::AsyncService service_;
   std::unique_ptr<Server> server_;
 };
