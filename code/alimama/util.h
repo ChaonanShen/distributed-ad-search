@@ -12,22 +12,21 @@
 
 #define RUN_REMOTE 1
 
-// keyword -> 文件中offset
-using IndexType = std::unordered_multimap<uint64_t, uint64_t>;
-
-// mmap文件指针
-extern void *fileData;
-extern IndexType kw2offset;
-
 struct Data;
+
+// keyword -> 文件中offset
+using IndexType = std::unordered_multimap<uint64_t, Data>;
+extern IndexType kw2data;
 
 int hashKeyword(uint64_t keyword);
 float GetCTR(const Data &data, float req_vec1, float req_vec2);
 float GetDataScore(const Data &data, float req_vec1, float req_vec2);
 
 // 使用GCC/CLANG的__attribute__((packed))可以不进行对齐，但是性能会有影响，我这里还是先对齐吧
-// struct __attribute__((packed)) Data {
-struct Data { // keyword直接保存在索引里，磁盘文件中不用再保存了
+#pragma pack(push, 1)
+struct Data {
+  // struct Data {
+  // keyword直接保存在索引里
   // uint64_t keyword;
   uint64_t adgroup_id;
 
@@ -65,6 +64,7 @@ private:
     std::cout << "| ";
   }
 };
+#pragma pack(pop)
 
 // 数据本身及其分数
 struct DataScore {
@@ -108,8 +108,7 @@ private:
 };
 
 // ------ 读取csv数据(满足hash(x)==node_id-1的)，紧凑的保存，建立内存索引 ------
-void prepareData(int node_id, IndexType &index, std::string ifilename,
-                 std::string ofilename);
+void prepareData(int node_id, IndexType &index, std::string ifilename);
 
 // ------ 计算出最好的那一条广告单元 ------
 std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
@@ -124,10 +123,10 @@ class AlimamaCSVReader {
 public:
   using HashFunc = std::function<int(uint64_t)>;
 
-  AlimamaCSVReader(std::string ifilename, std::string ofilename,
-                   IndexType &index, HashFunc has, int node_id)
-      : ifilename_(ifilename), ofilename_(ofilename), index_(index),
-        hash_(hashKeyword), node_id_(node_id) {}
+  AlimamaCSVReader(std::string ifilename, IndexType &index, HashFunc has,
+                   int node_id)
+      : ifilename_(ifilename), index_(index), hash_(hashKeyword),
+        node_id_(node_id) {}
 
   // TODO(scn): 解析每一行的代码一定要效率高 这个函数要在10min内完成！
   // 这里大量的string生成和析构是否开销很大？能否弄个内存池复用 -
@@ -137,14 +136,6 @@ public:
     int fileDescriptor = open(this->ifilename_.c_str(), O_RDONLY);
     if (fileDescriptor < 0) {
       std::cerr << "Error opening file: " << this->ifilename_ << std::endl;
-      return;
-    }
-
-    // 打开最终输出的文件
-    std::ofstream outfile(ofilename_, std::ios::binary);
-    if (!outfile) {
-      std::cerr << "Failed to open the file for writing: " << ofilename_
-                << std::endl;
       return;
     }
 
@@ -184,11 +175,8 @@ public:
       if (readCsvLine(lineStart, len, entry, keyword)) {
         // true才是满足条件的entry
         linecount++;
-        // 直接用内存到磁盘数据的映射
-        outfile.write((char *)&entry, sizeof(Data));
         // 建立内存索引
-        index_.insert(std::make_pair(keyword, offset));
-        offset += sizeof(Data);
+        index_.insert(std::make_pair(keyword, entry));
       }
       lineStart = lineEnd + 1;
     }
@@ -201,7 +189,6 @@ public:
     std::cout << "line_count: " << linecount << std::endl;
 
     close(fileDescriptor);
-    outfile.close();
   }
 
   // keyword是当前节点的
@@ -213,25 +200,6 @@ public:
   bool filterStatus(int8_t status) {
     // TODO(scn): 这个为啥直接status==1判断就有问题？？？
     return (status & 1);
-  }
-
-  std::vector<Data> readAllFromDisk() {
-    std::vector<Data> data;
-    std::ifstream infile(ofilename_, std::ios::binary);
-    if (!infile) {
-      std::cerr << "Failed to open the file for reading: " << ofilename_
-                << std::endl;
-      return data;
-    }
-    while (infile) {
-      Data d;
-      infile.read((char *)&d, sizeof(Data));
-      if (infile) { // 这个好像不能缺，不然数据仿佛会诡异的多出一行
-        data.push_back(d);
-      }
-    }
-    infile.close();
-    return data;
   }
 
 private:
@@ -301,7 +269,6 @@ private:
 
   // raw data filename
   std::string ifilename_; // 输入的csv文件名
-  std::string ofilename_; // 输出的二进制文件名
   // mutex mtx_;
   int file_count_ = 0;
   IndexType &index_;

@@ -46,12 +46,10 @@ static std::string getCurrentServerAddr() {
 }
 static std::string getSearchServerAddr(int index) { return serverAddr[index]; }
 
-// mmap文件指针
-extern void *fileData;
 
-// keyword -> 文件中offset
-// using IndexType = std::unordered_multimap<uint64_t, uint64_t>;
-extern IndexType kw2offset;
+// 内存索引 keyword -> Data
+// using IndexType = std::unordered_multimap<uint64_t, Data>;
+extern IndexType kw2data;
 
 // 两浮点数在1e-6误差范围内认为是相等
 auto floatEqual = [](float f1, float f2) -> bool {
@@ -87,6 +85,9 @@ void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
 
 int main(int argc, char **argv) {
+  static_assert(sizeof(Data) == 22);
+  // 紧凑的保存Data
+
   port = getPort(argc, argv);
 
   auto str = std::getenv("NODE_ID");
@@ -94,39 +95,22 @@ int main(int argc, char **argv) {
     NODE_ID = atoi(str);
   }
 
+  // TODO(scn): 这里假设每个节点大概1.5亿行数据
+  kw2data.reserve(150000000);
+
   // TODO(scn): 数据处理逻辑
   // 将csv中对应数据读取出来 保存到磁盘上 同时建立内存索引
 
   std::string ifilename = "/data/data.csv";
-  std::string ofilename = std::string("savedFile") + std::to_string(NODE_ID);
 
-  prepareData(NODE_ID, kw2offset, ifilename, ofilename);
+  prepareData(NODE_ID, kw2data, ifilename);
 
   // 打印下内存索引
-  // for (auto it : kw2offset) {
-  //   std::cout << it.first << " -> " << it.second << std::endl;
+  // for (auto it : kw2data) {
+  //   std::cout << it.first << " -> " << std::endl;
+  //   it.second.print();
   // }
 
-  // 将磁盘的数据文件直接mmap映射到内存
-  int fd = open(ofilename.c_str(), O_RDONLY);
-  if (fd < 0) {
-    std::cerr << "Error opening file: " << ofilename << std::endl;
-    return -1;
-  }
-
-  struct stat fileInfo;
-  if (fstat(fd, &fileInfo) < 0) {
-    std::cerr << "Error getting file size." << std::endl;
-    close(fd);
-    return -1;
-  }
-  off_t fileSize = fileInfo.st_size;
-  fileData = mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0);
-  if (fileData == MAP_FAILED) {
-    std::cerr << "Error mapping file to memory." << std::endl;
-    close(fd);
-    return -1;
-  }
 
 #if RUN_REMOTE
   // 首先知道自己的ip:port和其他节点的ip:port
@@ -159,7 +143,7 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-ThreadPool pool(9);
+ThreadPool pool(12);
 
 void doSearch(const Request *request, Response *response) {
   auto topn = request->topn();
@@ -281,7 +265,7 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
   std::vector<DataScore> preResult;
   for (int i = 0; i < request->keywords().size(); i++) {
     uint64_t keyword = request->keywords(i);
-    if (kw2offset.find(keyword) == kw2offset.end())
+    if (kw2data.find(keyword) == kw2data.end())
       continue;
     auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
     preResult.reserve(preResult.size() + vec.size());

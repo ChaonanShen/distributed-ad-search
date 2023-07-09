@@ -34,7 +34,7 @@ class LoadBalancerImpl final : public SearchService::Service {
   Status Search(ServerContext *context, const Request *request,
                 Response *response) override {
     // 轮流转发给不同的机器
-    static int i = 0;
+    static std::atomic<int> i = 0;
     i = (i + 1) % 3;
 
     grpc::ClientContext client_context;
