@@ -40,14 +40,16 @@ public:
     // 可以只用一个HandleRpcs(),也可以用多个,反正CompletionQueue是并发安全的
     // 处理从cq中获得的事件
 
-    // HandleCallSearch和HandleCallSearchLocal比例是1:3
+    // HandleCallSearch和HandleCallSearchLocal比例应该是1:1
+    // 因为一个Request在某个节点上Search和SearchLocal调用数量是一样的！
     std::vector<std::thread> threads;
-    const int num_search_threads = 2;
+    // 把这个cq的数量弄大，qps倍增
+    const int num_search_threads = 16;
     for (int i = 0; i < num_search_threads; i++) {
       threads.push_back(
           std::thread(std::bind(&AsyncServerImpl::HandleCallSearch, this)));
     }
-    for (int i = 0; i < num_search_threads * 3; i++) {
+    for (int i = 0; i < num_search_threads; i++) {
       threads.push_back(std::thread(
           std::bind(&AsyncServerImpl::HandleCallSearchLocal, this)));
     }

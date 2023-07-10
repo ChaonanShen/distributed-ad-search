@@ -46,7 +46,6 @@ static std::string getCurrentServerAddr() {
 }
 static std::string getSearchServerAddr(int index) { return serverAddr[index]; }
 
-
 // 内存索引 keyword -> Data
 // using IndexType = std::unordered_multimap<uint64_t, Data>;
 extern IndexType kw2data;
@@ -111,7 +110,6 @@ int main(int argc, char **argv) {
   //   it.second.print();
   // }
 
-
 #if RUN_REMOTE
   // 首先知道自己的ip:port和其他节点的ip:port
   etcd::Client etcd("http://etcd:2379");
@@ -143,7 +141,7 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-ThreadPool pool(12);
+ThreadPool pool(64);
 
 void doSearch(const Request *request, Response *response) {
   auto topn = request->topn();
