@@ -25,34 +25,26 @@ float GetDataScore(const Data &data, float req_vec1, float req_vec2);
 // 使用GCC/CLANG的__attribute__((packed))可以不进行对齐，但是性能会有影响，我这里还是先对齐吧
 #pragma pack(push, 1)
 struct Data {
-  // struct Data {
   // keyword直接保存在索引里
   // uint64_t keyword;
   uint64_t adgroup_id;
-
-  // uint64_t campaign_id;
-  // uint64_t item_id;
 
   float vec1; // 确保sizeof(float) == 4!
   float vec2;
 
   char timings_hex[3];
   uint16_t keyword_prices; // price是uint16
-  int8_t status;
 
   void print() {
     // std::cout << "keyword " << keyword << std::endl;
     std::cout << "adgroup_id " << adgroup_id << std::endl;
     std::cout << "keyword prices " << keyword_prices << std::endl;
-    std::cout << "status " << status << std::endl;
     std::cout << "timings ";
     for (int i = 0; i < 3; ++i) {
       printBinary(timings_hex[i]);
     }
     std::cout << std::endl;
     std::cout << "vectors " << vec1 << " " << vec2 << std::endl;
-    // std::cout << "campaign_id " << campaign_id << std::endl;
-    // std::cout << "item_id " << item_id << std::endl;
     std::cout << "========================" << std::endl;
   }
 
@@ -208,7 +200,7 @@ private:
     std::string str(lineStart, len);
 
     std::istringstream lineStream(str);
-    // uint64_t keyword, adgroup_id, keyword_prices;
+    // uint64_t keyword;
     uint64_t adgroup_id, keyword_prices;
 
     std::string timings_str;
@@ -257,12 +249,9 @@ private:
     // entry.keyword = keyword;
     entry.adgroup_id = adgroup_id;
     entry.keyword_prices = keyword_prices;
-    entry.status = status;
     std::memcpy(entry.timings_hex, bytes, 3);
     entry.vec1 = vector_[0];
     entry.vec2 = vector_[1];
-    // entry.campaign_id = campaign_id;
-    // entry.item_id = item_id;
 
     return true;
   }

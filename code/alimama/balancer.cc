@@ -19,6 +19,8 @@ using alimama::proto::Request;
 using alimama::proto::Response;
 using alimama::proto::SearchService;
 
+// TODO(scn): 貌似grpc直接提供balancer方法
+
 // server1 ip1:50051 server2 ip2:50052 server3 ip3:50053
 static std::string searchServerAddrs[3];
 

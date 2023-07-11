@@ -84,7 +84,7 @@ void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
 
 int main(int argc, char **argv) {
-  static_assert(sizeof(Data) == 22);
+  static_assert(sizeof(Data) == 21);
   // 紧凑的保存Data
 
   port = getPort(argc, argv);
@@ -141,34 +141,9 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-ThreadPool pool(64);
-
-void doSearch(const Request *request, Response *response) {
+void doSearchMerge(const Request *request, Response *response,
+                   ResponseLocal resp_local[3]) {
   auto topn = request->topn();
-
-  ResponseLocal resp_local[3];
-
-  std::vector<std::future<void>> futures;
-  futures.reserve(3);
-
-  for (int i = 0; i < 3; i++) {
-    futures.push_back(pool.enqueue(
-        [](int i, const Request *request, ResponseLocal &resp) {
-          ClientContext context;
-          Status status = stubs[i]->SearchLocal(&context, *request, &resp);
-          if (!status.ok()) {
-            std::cout << getCurrentServerAddr() << " subrequest -> "
-                      << getSearchServerAddr(i) << " SearchLocal RPC failed"
-                      << std::endl;
-          }
-        },
-        i, request, std::ref(resp_local[i])));
-  }
-
-  for (auto &future : futures) {
-    future.get();
-  }
-
   std::vector<LocalResult> result;
   std::vector<float> prices;
 
@@ -247,6 +222,35 @@ void doSearch(const Request *request, Response *response) {
     response->add_adgroup_ids(result[i].adgroup_id);
     response->add_prices(static_cast<uint64_t>(std::round(prices[i])));
   }
+}
+
+ThreadPool pool(64);
+
+void doSearch(const Request *request, Response *response) {
+  ResponseLocal resp_local[3];
+
+  std::vector<std::future<void>> futures;
+  futures.reserve(3);
+
+  for (int i = 0; i < 3; i++) {
+    futures.push_back(pool.enqueue(
+        [](int i, const Request *request, ResponseLocal &resp) {
+          ClientContext context;
+          Status status = stubs[i]->SearchLocal(&context, *request, &resp);
+          if (!status.ok()) {
+            std::cout << getCurrentServerAddr() << " subrequest -> "
+                      << getSearchServerAddr(i) << " SearchLocal RPC failed"
+                      << std::endl;
+          }
+        },
+        i, request, std::ref(resp_local[i])));
+  }
+
+  for (auto &future : futures) {
+    future.get();
+  }
+
+  doSearchMerge(request, response, resp_local);
 }
 
 void doSearchLocal(const Request *request, ResponseLocal *response) {
