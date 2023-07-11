@@ -5,7 +5,7 @@ CXX = g++
 CPPFLAGS += `pkg-config --cflags protobuf grpc`
 CXXFLAGS += -std=c++17
 # TODO(scn): 正式提交后去掉-g 改为-O3
-CXXFLAGS += -O2 -g
+CXXFLAGS += -O3
 
 LDFLAGS += -L/usr/local/lib \
 		   -letcd-cpp-api\
@@ -13,7 +13,7 @@ LDFLAGS += -L/usr/local/lib \
 		   -lboost_log\
 		   -lssl\
 		   -lcrypto\
-		   -O2 -g\
+		   -O3\
        -pthread\
 		   `pkg-config --libs --static protobuf grpc++`\
        -ldl
