@@ -48,7 +48,7 @@ static std::string getSearchServerAddr(int index) { return serverAddr[index]; }
 
 // 内存索引 keyword -> Data
 // using IndexType = std::unordered_multimap<uint64_t, Data>;
-extern IndexType kw2data;
+extern IndexType kw2index;
 
 // 两浮点数在1e-6误差范围内认为是相等
 auto floatEqual = [](float f1, float f2) -> bool {
@@ -84,7 +84,8 @@ void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
 
 int main(int argc, char **argv) {
-  static_assert(sizeof(Data) == 21);
+  // TODO(scn): 加上个keyword的话容量暴涨，从21->29，能不能列存？
+  static_assert(sizeof(Data) == 29);
   // 紧凑的保存Data
 
   port = getPort(argc, argv);
@@ -95,19 +96,40 @@ int main(int argc, char **argv) {
   }
 
   // TODO(scn): 这里假设每个节点大概1.5亿行数据
-  kw2data.reserve(150000000);
+  // kw2index.reserve(150000000);
+  datas.reserve(150000000);
 
   // TODO(scn): 数据处理逻辑
   // 将csv中对应数据读取出来 保存到磁盘上 同时建立内存索引
 
   std::string ifilename = "/data/data.csv";
 
-  prepareData(NODE_ID, kw2data, ifilename);
+  prepareData(NODE_ID, ifilename, datas);
 
-  // 打印下内存索引
-  // for (auto it : kw2data) {
-  //   std::cout << it.first << " -> " << std::endl;
-  //   it.second.print();
+  // datas排序并建立kw2index
+  sort(datas.begin(), datas.end(),
+       [](const Data &d1, const Data &d2) { return d1.keyword < d2.keyword; });
+  kw2index.reserve(datas.size());
+
+  if (!datas.empty())
+    kw2index[datas[0].keyword] = 0;
+  uint64_t last_keyword = datas[0].keyword;
+  for (int i = 1; i < datas.size(); i++) {
+    auto keyword = datas[i].keyword;
+    if (keyword != last_keyword) {
+      kw2index[keyword] = i;
+      last_keyword = keyword;
+    }
+  }
+
+  // 打印下内容 - keyword->数组下标
+  // std::cout << "datas:" << std::endl;
+  // for (auto entry : datas) {
+  //   entry.print();
+  // }
+  // std::cout << "kw2index:" << std::endl;
+  // for (auto it : kw2index) {
+  //   std::cout << it.first << " -> " << it.second << std::endl;
   // }
 
 #if RUN_REMOTE
@@ -267,8 +289,9 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
   std::vector<DataScore> preResult;
   for (int i = 0; i < request->keywords().size(); i++) {
     uint64_t keyword = request->keywords(i);
-    // TODO(scn): 先用bloom fitler过滤调那些不存在的keyword 毕竟有2/3的keywords不存在
-    if (kw2data.find(keyword) == kw2data.end())
+    // TODO(scn): 先用bloom fitler过滤调那些不存在的keyword
+    // 毕竟有2/3的keywords不存在
+    if (kw2index.find(keyword) == kw2index.end())
       continue;
     auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
     // 不需要手动reserve

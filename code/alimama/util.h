@@ -15,8 +15,9 @@
 struct Data;
 
 // keyword -> 文件中offset
-using IndexType = std::unordered_multimap<uint64_t, Data>;
-extern IndexType kw2data;
+using IndexType = std::unordered_map<uint64_t, uint32_t>;
+extern IndexType kw2index;
+extern std::vector<Data> datas;
 
 int hashKeyword(uint64_t keyword);
 float GetCTR(const Data &data, float req_vec1, float req_vec2);
@@ -26,7 +27,7 @@ float GetDataScore(const Data &data, float req_vec1, float req_vec2);
 #pragma pack(push, 1)
 struct Data {
   // keyword直接保存在索引里
-  // uint64_t keyword;
+  uint64_t keyword;
   uint64_t adgroup_id;
 
   float vec1; // 确保sizeof(float) == 4!
@@ -36,7 +37,7 @@ struct Data {
   uint16_t keyword_prices; // price是uint16
 
   void print() {
-    // std::cout << "keyword " << keyword << std::endl;
+    std::cout << "keyword " << keyword << std::endl;
     std::cout << "adgroup_id " << adgroup_id << std::endl;
     std::cout << "keyword prices " << keyword_prices << std::endl;
     std::cout << "timings ";
@@ -100,7 +101,7 @@ private:
 };
 
 // ------ 读取csv数据(满足hash(x)==node_id-1的)，紧凑的保存，建立内存索引 ------
-void prepareData(int node_id, IndexType &index, std::string ifilename);
+void prepareData(int node_id, std::string ifilename, std::vector<Data> &datas);
 
 // ------ 计算出最好的那一条广告单元 ------
 std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
@@ -115,10 +116,10 @@ class AlimamaCSVReader {
 public:
   using HashFunc = std::function<int(uint64_t)>;
 
-  AlimamaCSVReader(std::string ifilename, IndexType &index, HashFunc has,
-                   int node_id)
-      : ifilename_(ifilename), index_(index), hash_(hashKeyword),
-        node_id_(node_id) {}
+  AlimamaCSVReader(std::string ifilename, HashFunc has, int node_id,
+                   std::vector<Data> &datas)
+      : ifilename_(ifilename), hash_(hashKeyword), node_id_(node_id),
+        datas_(datas) {}
 
   // TODO(scn): 解析每一行的代码一定要效率高 这个函数要在10min内完成！
   // 这里大量的string生成和析构是否开销很大？能否弄个内存池复用 -
@@ -155,6 +156,7 @@ public:
 
     uint64_t offset = 0;
     while (lineStart < csvData + fileSize) {
+      // 表示找 '\n'字符第一次出现的位置的指针，找不到就返回空指针
       lineEnd = strchr(lineStart, '\n');
       if (lineEnd == nullptr) {
         lineEnd = csvData + fileSize; // 文件末尾
@@ -167,8 +169,7 @@ public:
       if (readCsvLine(lineStart, len, entry, keyword)) {
         // true才是满足条件的entry
         linecount++;
-        // 建立内存索引
-        index_.insert(std::make_pair(keyword, entry));
+        datas_.emplace_back(entry);
       }
       lineStart = lineEnd + 1;
     }
@@ -246,7 +247,7 @@ private:
     bytes[2] = value & 0xFF;
 
     // 从解析得到的数据构造 Data 结构体
-    // entry.keyword = keyword;
+    entry.keyword = keyword;
     entry.adgroup_id = adgroup_id;
     entry.keyword_prices = keyword_prices;
     std::memcpy(entry.timings_hex, bytes, 3);
@@ -260,7 +261,7 @@ private:
   std::string ifilename_; // 输入的csv文件名
   // mutex mtx_;
   int file_count_ = 0;
-  IndexType &index_;
+  std::vector<Data> &datas_;
   HashFunc hash_;
   const int node_id_;
 };

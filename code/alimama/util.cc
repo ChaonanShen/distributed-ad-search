@@ -9,14 +9,16 @@
 #include "util.h"
 
 // 全局变量定义在util中，其他地方extern引用
-IndexType kw2data;
+IndexType kw2index;
+// TODO(scn): 在datas中最好不要保存keyword，keyword用另一个vector保存，两个vector一同排序（用个辅助索引即可）
+std::vector<Data> datas;
 
 int hashKeyword(uint64_t keyword) { return keyword % 3; }
 
 // 读取csv数据(满足hash(x)==node_id-1的)
 // 紧凑的保存，建立keyword->Data的内存索引
-void prepareData(int node_id, IndexType &index, std::string ifilename) {
-  AlimamaCSVReader reader(ifilename, index, hashKeyword, node_id);
+void prepareData(int node_id, std::string ifilename, std::vector<Data> &datas) {
+  AlimamaCSVReader reader(ifilename, hashKeyword, node_id, datas);
   reader.readCsvAndSave();
 }
 
@@ -44,12 +46,16 @@ bool filterHour(Data &entry, uint64_t hour) {
 std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
                                      uint64_t topn, float context_vec[2]) {
   // 找到所有keyword的Data entry
-  auto range = kw2data.equal_range(keyword);
-  // 从文件中读取，找到top(n+1) -> 因为第topn个要根据top(n+1)个来确定分数
+  auto it = kw2index.find(keyword);
+  auto index = it->second;
 
+  // 从文件中读取，找到top(n+1) -> 因为第topn个要根据top(n+1)个来确定分数
   TopN topN(topn + 1);
-  for (auto it = range.first; it != range.second; it++) {
-    auto entry = it->second;
+  for (uint32_t i = index;; i++) {
+    auto entry = datas[i];
+    if (entry.keyword != keyword) {
+      break;
+    }
     // 读出数据
     if (filterHour(entry, hour)) { // 要时段匹配的
       topN.insert({entry, GetDataScore(entry, context_vec[0], context_vec[1])});
