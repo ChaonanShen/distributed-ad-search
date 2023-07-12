@@ -140,6 +140,8 @@ private:
     }
   };
 
+  // TODO(scn): 我突然想到，其实CallSearch和CallSearchLocal其实完全可以共享CompletionQueue
+
   void HandleCallSearch() {
     new CallSearch(&service_, cq1_.get());
     std::thread t([this]() {

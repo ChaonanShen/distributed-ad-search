@@ -189,7 +189,7 @@ void doSearchMerge(const Request *request, Response *response,
       // 没有重复的广告单元
       exist_adgroup_ids.insert(ds.adgroup_id);
       count++;
-      result.push_back(ds);
+      result.emplace_back(ds);
     }
   }
 
@@ -233,7 +233,7 @@ void doSearch(const Request *request, Response *response) {
   futures.reserve(3);
 
   for (int i = 0; i < 3; i++) {
-    futures.push_back(pool.enqueue(
+    futures.emplace_back(pool.enqueue(
         [](int i, const Request *request, ResponseLocal &resp) {
           ClientContext context;
           Status status = stubs[i]->SearchLocal(&context, *request, &resp);
@@ -267,13 +267,12 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
   std::vector<DataScore> preResult;
   for (int i = 0; i < request->keywords().size(); i++) {
     uint64_t keyword = request->keywords(i);
+    // TODO(scn): 先用bloom fitler过滤调那些不存在的keyword 毕竟有2/3的keywords不存在
     if (kw2data.find(keyword) == kw2data.end())
       continue;
     auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
-    preResult.reserve(preResult.size() + vec.size());
-    for (auto &ds : vec) {
-      preResult.emplace_back(ds);
-    }
+    // 不需要手动reserve
+    preResult.insert(preResult.end(), vec.begin(), vec.end());
   }
 
   // 先按照分数排序
@@ -301,7 +300,7 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
       // 没有重复的广告单元
       exist_adgroup_ids.insert(ds.data.adgroup_id);
       count++;
-      result.push_back(ds);
+      result.emplace_back(ds);
     }
   }
 

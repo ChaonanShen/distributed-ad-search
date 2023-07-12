@@ -56,6 +56,7 @@ std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
     }
   }
 
+  // TODO(scn): 改为直接返回topN结构然后一个个插入最终vector
   return topN.getTopN();
 }
 

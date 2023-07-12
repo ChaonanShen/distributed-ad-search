@@ -88,7 +88,7 @@ public:
     std::vector<DataScore> result;
     while (!pq.empty()) {
       // top的是最小的，所以先出去
-      result.push_back(pq.top());
+      result.emplace_back(pq.top());
       pq.pop();
     }
     return result;
