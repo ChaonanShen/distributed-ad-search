@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package alimama.proto;
+
+message Request {
+  // 指定返回的广告需要匹配的keyword。
+  repeated uint64 keywords = 1;
+
+  // 根据用户和关键词生成的上下文向量。向量维度为2。
+  repeated float context_vector = 2;
+
+  // 指定返回的广告需要匹配的时段，取值范围为[0,23]
+  uint64 hour = 3;
+
+  // 返回的广告单元的数量，若满足后续条件的广告单元数量不足`topn`个，则返回所有满足条件的广告单元
+  // 若满足后续条件的广告单元数量超过`topn`个，则返回按分数降序排列的前`topn`个广告单元。
+  uint64 topn = 4;
+}
+
+message Response {
+  // 广告单元id
+  repeated uint64 adgroup_ids = 1;
+
+  // 广告单元对应的计费价格(单位为分)
+  repeated uint64 prices = 2;
+}
+
+message AdgroupResp {
+  // 广告单元id
+  uint64 adgroup_id = 1;
+  // 预估点击率
+  float ctr = 2;
+  // 排序分数
+  float score = 3;
+  // 就是每个广告单元本身的出价，而不是最后排序后计算得来的计费价格
+  uint32 price = 4; // protobuf最小是uint32，虽然price是uint16
+}
+
+// SeachLocal返回的结果
+// 每个keyword对应的topn+1(可能不到)个广告单元的结果
+message ResponseLocal {
+  repeated AdgroupResp array = 1;
+}
+
+/* 
+SearchLocal表示Request已经保证Requst是本地的了
+而使用Search则会将Request分成三份发给不同的server进行SearchLocal，然后收到回复后
+*/
+
+service SearchService {
+  rpc Search(Request) returns (Response) {}
+  rpc SearchLocal(Request) returns (ResponseLocal) {}
+}
