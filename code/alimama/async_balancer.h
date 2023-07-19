@@ -130,14 +130,15 @@ void AsyncBalancerClient::Proceed() {
 }
 
 class AsyncBalancerImpl final {
-  std::unique_ptr<ServerCompletionQueue> cq_;
+  std::vector<std::unique_ptr<ServerCompletionQueue>> cqs_;
   SearchService::AsyncService service_;
   std::unique_ptr<Server> server_;
 
 public:
   ~AsyncBalancerImpl() {
     server_->Shutdown();
-    cq_->Shutdown();
+    for (auto &cq : cqs_)
+      cq->Shutdown();
   }
 
   void Run() {
@@ -146,7 +147,9 @@ public:
     ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service_);
-    cq_ = builder.AddCompletionQueue();
+
+    for (int i = 0; i < balancer_cq_num; i++)
+      cqs_.emplace_back(builder.AddCompletionQueue());
 
     server_ = builder.BuildAndStart();
     std::cout << "Balancer listening on " << server_address << std::endl;
@@ -166,18 +169,25 @@ public:
     }
 #endif
 
-    new CallSearch(&service_, cq_.get());
-    std::thread th(&AsyncBalancerImpl::HandleRpcs, this);
+    std::vector<std::thread> threads;
 
-    th.join();
+    for (int i = 0; i < balancer_cq_num; i++) {
+      new CallSearch(&service_, cqs_[i].get());
+      threads.emplace_back(
+          std::thread(&AsyncBalancerImpl::HandleRpcs, this, i));
+    }
+
+    for (auto &th : threads)
+      th.join();
   }
 
 private:
-  void HandleRpcs() {
+  void HandleRpcs(int idx) {
     void *tag;
     bool ok;
     while (true) {
-      GPR_ASSERT(cq_->Next(&tag, &ok));
+      GPR_ASSERT(cqs_[idx]->Next(&tag, &ok));
+      GPR_ASSERT(ok);
       CallBase *base = (CallBase *)tag;
       base->Proceed();
     }

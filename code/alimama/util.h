@@ -20,6 +20,7 @@ using alimama::proto::SearchService;
 
 #define RUN_REMOTE 1
 
+const int balancer_cq_num = 8;
 const int server_cq_num = 16;
 
 struct Data;
