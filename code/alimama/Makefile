@@ -43,7 +43,7 @@ client: alimama.pb.o alimama.grpc.pb.o client.o util.o
 server: alimama.pb.o alimama.grpc.pb.o server.o util.o async_server.h
 	$(CXX) $^ $(LDFLAGS) -o $@
 
-balancer: alimama.pb.o alimama.grpc.pb.o balancer.o util.o
+balancer: alimama.pb.o alimama.grpc.pb.o balancer.o util.o async_balancer.h
 	$(CXX) $^ $(LDFLAGS) -o $@
 
 .PRECIOUS: %.grpc.pb.cc
