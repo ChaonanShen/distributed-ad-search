@@ -20,12 +20,12 @@ using alimama::proto::Response;
 using alimama::proto::ResponseLocal;
 using alimama::proto::SearchService;
 
-// doSearch直接在CallSearch中异步处理
-// void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
 void doSearchMerge(const Request *request, Response *response,
                    ResponseLocal resp_local[3]);
-ThreadPool tp(64);
+
+extern ThreadPool tp_io;
+extern ThreadPool tp_cpu;
 
 class AsyncServerImpl final {
 public:
@@ -135,7 +135,7 @@ private:
       } else if (status_ == PROCESS2) {
         auto cnt = resp_counter_.fetch_add(1);
         if (cnt == 2) {
-          tp.enqueue([&]() {
+          tp_io.enqueue([&]() {
             status_ = FINISH;
             doSearchMerge(&request_, &reply_, resp_local_);
             responder_.Finish(reply_, Status::OK, this);
@@ -176,12 +176,14 @@ private:
                                      this);
       } else if (status_ == PROCESS) {
         // 准备处理当前事件，新生成一个对象，接收新的请求
-        new CallSearchLocal(service_, cq_);
-        // 正式操作，生成Response
-        // 如果doSearchLocal很快，就不用搞个线程了
-        doSearchLocal(&request_, &reply_);
-        status_ = FINISH;
-        responder_.Finish(reply_, Status::OK, this);
+        tp_cpu.enqueue([&]() {
+          new CallSearchLocal(service_, cq_);
+          // 正式操作，生成Response
+          // 如果doSearchLocal很快，就不用搞个线程了
+          doSearchLocal(&request_, &reply_);
+          status_ = FINISH;
+          responder_.Finish(reply_, Status::OK, this);
+        });
       } else {
         GPR_ASSERT(status_ == FINISH);
         delete this;

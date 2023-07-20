@@ -35,6 +35,12 @@ using alimama::proto::SearchService;
 
 #include "util.h"
 
+// 我任务两种任务类型的线程池分开比较好，不然两种任务可能相互阻塞
+// io密集型的任务(doSearch)的线程池 - 数量大一些，毕竟大多数都是阻塞的
+ThreadPool tp_io(tp_io_num);
+// cpu密集型的任务(doSearchLocal)的线程池 - 数量不超过cpu个数
+ThreadPool tp_cpu(tp_cpu_num);
+
 // Search Servers的ports
 static const int PORTS[3] = {50051, 50052, 50053};
 
@@ -52,17 +58,6 @@ auto floatEqual = [](float f1, float f2) -> bool {
   return std::abs(f1 - f2) < 1e-6;
 };
 
-/**
- * 吃了没怎么学grpc的亏，两个rpc服务在一个server中就能运行，不需要搞两套
- * Search将Request发给三个节点(使用SearchLocal方法)，SearchLocal就只需要查找本地有的那些keywords，找出最多topn+1个返回
- * 最终Search里将三个节点返回的合并选出最后topn
- * TODO(scn): 一个权衡 - 是rpc请求/回复中字段多一些 还是 本地查询更多一些
- * 就是网络带宽和本地磁盘带宽的比拼 -
- * 尤其如果之后索引能直接保存很多数据的话，那rpc(LocalResult)少带点信息就行
- * 目前我选择SearchLocal将返回所有最终排序里所需要的内容
- * SearchLocal返回各个keywords排名topn+1的字段
- */
-
 // SearchLocal返回的结果
 struct LocalResult {
   uint64_t adgroup_id;
@@ -75,7 +70,6 @@ struct LocalResult {
   }
 };
 
-// void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
 void doSearchMerge(const Request *request, Response *response,
                    ResponseLocal resp_local[3]);
@@ -237,46 +231,6 @@ void doSearchMerge(const Request *request, Response *response,
     response->add_prices(static_cast<uint64_t>(std::round(prices[i])));
   }
 }
-
-// 用异步方式发送请求
-// void doSearch(const Request *request, Response *response) {
-//   // 发出请求，然后cq等待三个
-//   CompletionQueue cq;
-
-//   ClientContext context[3];
-//   Status status[3];
-//   ResponseLocal resp_local[3];
-//   std::unique_ptr<ClientAsyncResponseReader<ResponseLocal>>
-//   response_reader[3]; std::atomic_int resp_count = 0;
-
-//   for (int i = 0; i < 3; i++) {
-//     response_reader[i] =
-//         stubs[i]->PrepareAsyncSearchLocal(&context[i], *request, &cq);
-//     response_reader[i]->StartCall();
-//     response_reader[i]->Finish(&resp_local[i], &status[i], (void *)i);
-//   }
-
-//   void *got_tag;
-//   bool ok = false;
-//   while (cq.Next(&got_tag, &ok)) {
-//     GPR_ASSERT(ok);
-//     resp_count++;
-//     if (resp_count == 3) {
-//       break;
-//     }
-//   }
-
-//   for (int i = 0; i < 3; i++) {
-//     if (!status[i].ok()) {
-//       std::cout << "doSearch gRPC error: " << i
-//                 << " Error code: " << status[i].error_code() << ", "
-//                 << "Error message: " << status[i].error_message() <<
-//                 std::endl;
-//     }
-//   }
-
-//   doSearchMerge(request, response, resp_local);
-// }
 
 void doSearchLocal(const Request *request, ResponseLocal *response) {
   // 不在本地的keywords直接跳过

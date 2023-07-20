@@ -20,8 +20,12 @@ using alimama::proto::SearchService;
 
 #define RUN_REMOTE 1
 
-const int search_cq_num = 16;
+// 这样cq.Next等待队列的并发应该小一些就行，因为最重要的任务都线程池去做了
+const int search_cq_num = 8;
 const int searchlocal_cq_num = 8;
+
+const int tp_io_num = 64;
+const int tp_cpu_num = 12;
 
 struct Data;
 
