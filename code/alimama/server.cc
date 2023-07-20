@@ -285,7 +285,7 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
   }
 
   // 不用再计算最后的出价，直接把result排序号的最多topn+1个元素返回过去
-  for (auto res : result) {
+  for (auto &res : result) {
     AdgroupResp *adgroup_resp = response->add_array();
     adgroup_resp->set_adgroup_id(res.data.adgroup_id);
     adgroup_resp->set_ctr(GetCTR(res.data, context_vec[0], context_vec[1]));

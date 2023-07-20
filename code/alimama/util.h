@@ -16,6 +16,8 @@
 
 #include "alimama.grpc.pb.h"
 
+#include "flat_hash_map.h"
+
 using alimama::proto::SearchService;
 
 #define RUN_REMOTE 1
@@ -25,12 +27,12 @@ const int search_cq_num = 8;
 const int searchlocal_cq_num = 8;
 
 const int tp_io_num = 64;
-const int tp_cpu_num = 12;
+const int tp_cpu_num = 14;
 
 struct Data;
 
 // keyword -> 文件中offset
-using IndexType = std::unordered_map<uint64_t, uint32_t>;
+using IndexType = absl::flat_hash_map<uint64_t, uint32_t>;
 extern IndexType kw2index;
 extern std::vector<Data> datas;
 
