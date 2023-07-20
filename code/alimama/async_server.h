@@ -20,9 +20,11 @@ using alimama::proto::Response;
 using alimama::proto::ResponseLocal;
 using alimama::proto::SearchService;
 
-void doSearch(const Request *request, Response *response);
+// doSearch直接在CallSearch中异步处理
+// void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
-
+void doSearchMerge(const Request *request, Response *response,
+                   ResponseLocal resp_local[3]);
 ThreadPool tp(64);
 
 class AsyncServerImpl final {
@@ -34,8 +36,10 @@ public:
     builder.RegisterService(&service_);
 
     // 因为Search rpc会调用SearchLocal rpc,共用一个cq可能会死锁!
-    for (int i = 0; i < server_cq_num; i++) {
+    for (int i = 0; i < search_cq_num; i++) {
       cqs1_.emplace_back(builder.AddCompletionQueue());
+    }
+    for (int i = 0; i < searchlocal_cq_num; i++) {
       cqs2_.emplace_back(builder.AddCompletionQueue());
     }
 
@@ -50,11 +54,11 @@ public:
     // 因为一个Request在某个节点上Search和SearchLocal调用数量是一样的！
     std::vector<std::thread> threads;
     // 把这个cq的数量弄大，qps倍增
-    for (int i = 0; i < server_cq_num; i++) {
+    for (int i = 0; i < search_cq_num; i++) {
       threads.push_back(
           std::thread(&AsyncServerImpl::HandleCallSearch, this, i));
     }
-    for (int i = 0; i < server_cq_num; i++) {
+    for (int i = 0; i < searchlocal_cq_num; i++) {
       threads.push_back(
           std::thread(&AsyncServerImpl::HandleCallSearchLocal, this, i));
     }
@@ -86,8 +90,15 @@ private:
     Request request_;
     Response reply_;
     ServerAsyncResponseWriter<Response> responder_;
-    enum CallStatus { CREATE, PROCESS, FINISH };
+    enum CallStatus { CREATE, PROCESS, PROCESS2, FINISH };
     CallStatus status_;
+
+    std::atomic_int resp_counter_ = 0;
+    grpc::ClientContext context_[3];
+    ResponseLocal resp_local_[3];
+    std::unique_ptr<grpc::ClientAsyncResponseReader<ResponseLocal>>
+        response_reader_[3];
+    grpc::Status finish_status_[3];
 
   public:
     CallSearch(SearchService::AsyncService *service, ServerCompletionQueue *cq)
@@ -109,16 +120,29 @@ private:
         // RequestSearch调用后，遇到一个客户端连接就会告知
         service_->RequestSearch(&ctx_, &request_, &responder_, cq_, cq_, this);
       } else if (status_ == PROCESS) {
-        // 准备处理当前事件，新生成一个对象，接收新的请求
-        new CallSearch(service_, cq_);
-        // 正式操作，生成Response
         // TODO(scn):
         // 这个能否在另一个线程中异步进行，然后好了之后再通过cq提醒(反正Finish之后还会继续cq提醒)
         tp.enqueue([&]() {
-          doSearch(&request_, &reply_);
-          status_ = FINISH;
-          responder_.Finish(reply_, Status::OK, this);
+          // 准备处理当前事件，新生成一个对象，接收新的请求
+          new CallSearch(service_, cq_);
+          status_ = PROCESS2;
+
+          // 异步发出三个请求
+          for (int i = 0; i < 3; i++) {
+            response_reader_[i] =
+                stubs[i]->PrepareAsyncSearchLocal(&context_[i], request_, cq_);
+            response_reader_[i]->StartCall();
+            response_reader_[i]->Finish(&resp_local_[i], &finish_status_[i],
+                                        this);
+          }
         });
+      } else if (status_ == PROCESS2) {
+        auto cnt = resp_counter_.fetch_add(1);
+        if (cnt == 3) {
+          status_ = FINISH;
+          doSearchMerge(&request_, &reply_, resp_local_);
+          responder_.Finish(reply_, Status::OK, this);
+        }
       } else {
         GPR_ASSERT(status_ == FINISH);
         delete this;

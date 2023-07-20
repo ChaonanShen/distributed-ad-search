@@ -75,8 +75,10 @@ struct LocalResult {
   }
 };
 
-void doSearch(const Request *request, Response *response);
+// void doSearch(const Request *request, Response *response);
 void doSearchLocal(const Request *request, ResponseLocal *response);
+void doSearchMerge(const Request *request, Response *response,
+                   ResponseLocal resp_local[3]);
 
 int main(int argc, char **argv) {
   // TODO(scn): 加上个keyword的话容量暴涨，从21->29，能不能列存？
@@ -237,43 +239,44 @@ void doSearchMerge(const Request *request, Response *response,
 }
 
 // 用异步方式发送请求
-void doSearch(const Request *request, Response *response) {
-  // 发出请求，然后cq等待三个
-  CompletionQueue cq;
+// void doSearch(const Request *request, Response *response) {
+//   // 发出请求，然后cq等待三个
+//   CompletionQueue cq;
 
-  ClientContext context[3];
-  Status status[3];
-  ResponseLocal resp_local[3];
-  std::unique_ptr<ClientAsyncResponseReader<ResponseLocal>> response_reader[3];
-  std::atomic_int resp_count = 0;
+//   ClientContext context[3];
+//   Status status[3];
+//   ResponseLocal resp_local[3];
+//   std::unique_ptr<ClientAsyncResponseReader<ResponseLocal>>
+//   response_reader[3]; std::atomic_int resp_count = 0;
 
-  for (int i = 0; i < 3; i++) {
-    response_reader[i] =
-        stubs[i]->PrepareAsyncSearchLocal(&context[i], *request, &cq);
-    response_reader[i]->StartCall();
-    response_reader[i]->Finish(&resp_local[i], &status[i], (void *)i);
-  }
+//   for (int i = 0; i < 3; i++) {
+//     response_reader[i] =
+//         stubs[i]->PrepareAsyncSearchLocal(&context[i], *request, &cq);
+//     response_reader[i]->StartCall();
+//     response_reader[i]->Finish(&resp_local[i], &status[i], (void *)i);
+//   }
 
-  void *got_tag;
-  bool ok = false;
-  while (cq.Next(&got_tag, &ok)) {
-    GPR_ASSERT(ok);
-    resp_count++;
-    if (resp_count == 3) {
-      break;
-    }
-  }
+//   void *got_tag;
+//   bool ok = false;
+//   while (cq.Next(&got_tag, &ok)) {
+//     GPR_ASSERT(ok);
+//     resp_count++;
+//     if (resp_count == 3) {
+//       break;
+//     }
+//   }
 
-  for (int i = 0; i < 3; i++) {
-    if (!status[i].ok()) {
-      std::cout << "doSearch gRPC error: " << i
-                << " Error code: " << status[i].error_code() << ", "
-                << "Error message: " << status[i].error_message() << std::endl;
-    }
-  }
+//   for (int i = 0; i < 3; i++) {
+//     if (!status[i].ok()) {
+//       std::cout << "doSearch gRPC error: " << i
+//                 << " Error code: " << status[i].error_code() << ", "
+//                 << "Error message: " << status[i].error_message() <<
+//                 std::endl;
+//     }
+//   }
 
-  doSearchMerge(request, response, resp_local);
-}
+//   doSearchMerge(request, response, resp_local);
+// }
 
 void doSearchLocal(const Request *request, ResponseLocal *response) {
   // 不在本地的keywords直接跳过
