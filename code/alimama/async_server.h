@@ -120,28 +120,26 @@ private:
         // RequestSearch调用后，遇到一个客户端连接就会告知
         service_->RequestSearch(&ctx_, &request_, &responder_, cq_, cq_, this);
       } else if (status_ == PROCESS) {
-        // TODO(scn):
-        // 这个能否在另一个线程中异步进行，然后好了之后再通过cq提醒(反正Finish之后还会继续cq提醒)
-        tp.enqueue([&]() {
-          // 准备处理当前事件，新生成一个对象，接收新的请求
-          new CallSearch(service_, cq_);
-          status_ = PROCESS2;
+        // 准备处理当前事件，新生成一个对象，接收新的请求
+        new CallSearch(service_, cq_);
+        status_ = PROCESS2;
 
-          // 异步发出三个请求
-          for (int i = 0; i < 3; i++) {
-            response_reader_[i] =
-                stubs[i]->PrepareAsyncSearchLocal(&context_[i], request_, cq_);
-            response_reader_[i]->StartCall();
-            response_reader_[i]->Finish(&resp_local_[i], &finish_status_[i],
-                                        this);
-          }
-        });
+        // 异步发出三个请求
+        for (int i = 0; i < 3; i++) {
+          response_reader_[i] =
+              stubs[i]->PrepareAsyncSearchLocal(&context_[i], request_, cq_);
+          response_reader_[i]->StartCall();
+          response_reader_[i]->Finish(&resp_local_[i], &finish_status_[i],
+                                      this);
+        }
       } else if (status_ == PROCESS2) {
         auto cnt = resp_counter_.fetch_add(1);
-        if (cnt == 3) {
-          status_ = FINISH;
-          doSearchMerge(&request_, &reply_, resp_local_);
-          responder_.Finish(reply_, Status::OK, this);
+        if (cnt == 2) {
+          tp.enqueue([&]() {
+            status_ = FINISH;
+            doSearchMerge(&request_, &reply_, resp_local_);
+            responder_.Finish(reply_, Status::OK, this);
+          });
         }
       } else {
         GPR_ASSERT(status_ == FINISH);
@@ -200,11 +198,8 @@ private:
     bool ok;
     while (true) {
       GPR_ASSERT(cqs1_[cq_idx]->Next(&tag, &ok));
-      // TODO(scn): doSearch改成异步后，这里好像容易出问题(好像又不止)
-      // TODO(scn): 现在ok居然可能为false，这点让我很担心，之前程序都不会
-      // GPR_ASSERT(ok);
+      GPR_ASSERT(ok);
       CallSearch *call = static_cast<CallSearch *>(tag);
-      // TODO(scn): 不ok就直接FINISH阶段
       call->Proceed(ok);
     }
   }
