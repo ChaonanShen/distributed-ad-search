@@ -1,0 +1,13 @@
+3台server，每台16cpu，16G内存，各自保存总数居的1/3
+
+客户端给出请求是给出一系列keywords(u64)和其他信息，server上找相应匹配的数据，找到所有的匹配数据排序选出topn条返回
+
+因为数据分布式保存，所以每个server都运行两个rpc；一个rpc(Search)将客户端请求Request同时发往三个节点，每个节点给出单机返回结果，然后再合并成完整结果；另一个rpc(SearchLocal)受到请求，只返回本地中保存的数据；这两个rpc合起来完成一次分布式读取
+
+为了三台机器都能处理请求（因为对外只能暴露一个ip），所以还设置一个proxy server，作为负载均衡，将请求轮流发给三个节点相应处理（这个balancer直接就放在某个server上）
+
+自己写的代码都在code/alimama下面
+
+balancer代码在balancer.cc中，server代码在async_server.h和server.cc中，准备数据（三个节点各自从csv文件读取数据并形成最终只读map+vector）进行具体广告匹配计算并选出topn的代码在util.cc和util.h
+
+三台server运行的两个rpc都是异步的，最关键流程其实就是CallSearch的Proceed函数和CallSearchLocal的Proceed函数，里面就是异步接收发送请求的步骤
