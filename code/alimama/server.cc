@@ -1,10 +1,6 @@
-#include <cmath>
-#include <cstdlib>
-#include <iostream>
-#include <memory>
-#include <string>
-#include <vector>
+#include <bits/stdc++.h>
 
+#include <cstdlib>
 #include <semaphore.h>
 
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
@@ -189,7 +185,8 @@ void doSearchMerge(const Request *request, Response *response,
   // 去重并选出最后topn+1(可能不足topn+1)
   result.reserve(topn + 1);
 
-  std::set<uint64_t> exist_adgroup_ids;
+  absl::flat_hash_set<uint64_t> exist_adgroup_ids;
+  exist_adgroup_ids.reserve(topn + 1);
   int count = 0;
   for (int i = 0; i < preResult.size() && count < topn + 1; i++) {
     const LocalResult &ds = preResult[i];
@@ -226,7 +223,10 @@ void doSearchMerge(const Request *request, Response *response,
   //   result[i].print();
   // }
 
-  for (int i = 0; i < prices.size() && i < topn; i++) {
+  int num = std::min(prices.size(), topn);
+  response->mutable_adgroup_ids()->Reserve(num);
+  response->mutable_prices()->Reserve(num);
+  for (int i = 0; i < num; i++) {
     response->add_adgroup_ids(result[i].adgroup_id);
     response->add_prices(static_cast<uint64_t>(std::round(prices[i])));
   }
@@ -272,7 +272,8 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
   std::vector<DataScore> result;
   result.reserve(topn + 1);
 
-  std::set<uint64_t> exist_adgroup_ids;
+  absl::flat_hash_set<uint64_t> exist_adgroup_ids;
+  exist_adgroup_ids.reserve(topn + 1);
   int count = 0;
   for (int i = 0; i < preResult.size() && count < topn + 1; i++) {
     const DataScore &ds = preResult[i];
@@ -285,6 +286,7 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
   }
 
   // 不用再计算最后的出价，直接把result排序号的最多topn+1个元素返回过去
+  response->mutable_array()->Reserve(result.size());
   for (auto &res : result) {
     AdgroupResp *adgroup_resp = response->add_array();
     adgroup_resp->set_adgroup_id(res.data.adgroup_id);

@@ -28,7 +28,7 @@ vpath %.proto $(PROTOS_PATH)
 all: server balancer client one_client local_client
 
 # 如何自动找到依赖的头文件！
-util.o: util.cc util.h flat_hash_map.h
+util.o: util.cc util.h flat_hash_map.h flat_hash_set.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
 one_client: alimama.pb.o alimama.grpc.pb.o one_client.o util.o

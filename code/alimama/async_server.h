@@ -179,7 +179,6 @@ private:
         tp_cpu.enqueue([&]() {
           new CallSearchLocal(service_, cq_);
           // 正式操作，生成Response
-          // 如果doSearchLocal很快，就不用搞个线程了
           doSearchLocal(&request_, &reply_);
           status_ = FINISH;
           responder_.Finish(reply_, Status::OK, this);
@@ -202,6 +201,7 @@ private:
       GPR_ASSERT(cqs1_[cq_idx]->Next(&tag, &ok));
       GPR_ASSERT(ok);
       CallSearch *call = static_cast<CallSearch *>(tag);
+      // 这个Proceed没有太多耗时操作，耗时的网络io已经放到线程池中处理
       call->Proceed(ok);
     }
   }
@@ -213,6 +213,7 @@ private:
     while (true) {
       GPR_ASSERT(cqs2_[cq_idx]->Next(&tag, &ok));
       CallSearchLocal *call = static_cast<CallSearchLocal *>(tag);
+      // 最多16个节点同时进行Proceed，不过也够了，毕竟最多16核
       call->Proceed(ok);
     }
   }
