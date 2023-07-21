@@ -110,14 +110,13 @@ public:
     }
   }
 
-  std::vector<DataScore> getTopN() {
-    std::vector<DataScore> result;
+  void getTopN(std::vector<DataScore> &result) {
+    result.reserve(pq.size());
     while (!pq.empty()) {
       // top的是最小的，所以先出去
       result.emplace_back(pq.top());
       pq.pop();
     }
-    return result;
   }
 
 private:
@@ -129,8 +128,8 @@ private:
 void prepareData(int node_id, std::string ifilename, std::vector<Data> &datas);
 
 // ------ 计算出最好的那一条广告单元 ------
-std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
-                                     uint64_t topn, float context_vec[2]);
+void CalcAdgroupId(uint64_t keyword, uint64_t hour, uint64_t topn,
+                   float context_vec[2], std::vector<DataScore> &result);
 
 // ------ 其他方法 ------
 std::string getLocalIP();
