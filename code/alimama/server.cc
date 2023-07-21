@@ -250,7 +250,9 @@ void doSearchLocal(const Request *request, ResponseLocal *response) {
     // 毕竟有2/3的keywords不存在
     if (kw2index.find(keyword) == kw2index.end())
       continue;
-    auto vec = CalcAdgroupId(keyword, hour, topn, context_vec);
+
+    std::vector<DataScore> vec;
+    CalcAdgroupId(keyword, hour, topn, context_vec, vec);
     // 不需要手动reserve
     preResult.insert(preResult.end(), vec.begin(), vec.end());
   }

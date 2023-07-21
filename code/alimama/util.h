@@ -16,6 +16,7 @@
 
 #include "alimama.grpc.pb.h"
 
+#include "concurrent_queue.h"
 #include "flat_hash_map.h"
 #include "flat_hash_set.h"
 
@@ -24,8 +25,8 @@ using alimama::proto::SearchService;
 #define RUN_REMOTE 1
 
 // 这样cq.Next等待队列的并发应该小一些就行，因为最重要的任务都线程池去做了
-const int search_cq_num = 16;
-const int searchlocal_cq_num = 16;
+const int search_cq_num = 8;
+const int searchlocal_cq_num = 8;
 
 const int tp_io_num = 64;
 const int tp_cpu_num = 14;
@@ -110,14 +111,13 @@ public:
     }
   }
 
-  std::vector<DataScore> getTopN() {
-    std::vector<DataScore> result;
+  void getTopN(std::vector<DataScore> &result) {
+    result.reserve(pq.size());
     while (!pq.empty()) {
       // top的是最小的，所以先出去
       result.emplace_back(pq.top());
       pq.pop();
     }
-    return result;
   }
 
 private:
@@ -129,8 +129,8 @@ private:
 void prepareData(int node_id, std::string ifilename, std::vector<Data> &datas);
 
 // ------ 计算出最好的那一条广告单元 ------
-std::vector<DataScore> CalcAdgroupId(uint64_t keyword, uint64_t hour,
-                                     uint64_t topn, float context_vec[2]);
+void CalcAdgroupId(uint64_t keyword, uint64_t hour, uint64_t topn,
+                   float context_vec[2], std::vector<DataScore> &result);
 
 // ------ 其他方法 ------
 std::string getLocalIP();
@@ -334,6 +334,36 @@ private:
 
 std::string EtcdGetKVWait(etcd::Client &client, std::string key);
 void EtcdSetKV(etcd::Client &client, std::string key, std::string value);
+
+// class ThreadPool {
+// public:
+//   ThreadPool(size_t numThreads) {
+//     for (size_t i = 0; i < numThreads; ++i) {
+//       threads_.emplace_back([this] {
+//         while (true) {
+//           std::function<void()> task;
+//           if (queue_.try_dequeue(task)) {
+//             task();
+//           } else {
+//             std::this_thread::yield();
+//           }
+//         }
+//       });
+//     }
+//   }
+
+//   ~ThreadPool() {
+//     for (auto &thread : threads_) {
+//       thread.detach();
+//     }
+//   }
+
+//   void enqueue(const std::function<void()> &task) { queue_.enqueue(task); }
+
+// private:
+//   moodycamel::ConcurrentQueue<std::function<void()>> queue_;
+//   std::vector<std::thread> threads_;
+// };
 
 class ThreadPool {
 private:
