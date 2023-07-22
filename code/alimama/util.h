@@ -19,7 +19,16 @@
 #include "flat_hash_map.h"
 #include "flat_hash_set.h"
 
+using alimama::proto::BatchRequest;
+using alimama::proto::BatchResponseLocal;
+using alimama::proto::Request;
+using alimama::proto::Response;
+using alimama::proto::ResponseLocal;
 using alimama::proto::SearchService;
+
+void doSearchLocal(const BatchRequest *request, BatchResponseLocal *response);
+void doSearchMerge(const Request *request, Response *response,
+                   BatchResponseLocal resp_local[3], int batch_idx);
 
 #define RUN_REMOTE 1
 
@@ -27,6 +36,7 @@ using alimama::proto::SearchService;
 const int search_cq_num = 16;
 const int searchlocal_cq_num = 16;
 
+// 64-14 7-9 / 80-20 7-9 /
 const int tp_io_num = 64;
 const int tp_cpu_num = 14;
 
@@ -392,3 +402,67 @@ public:
       worker.join();
   }
 };
+
+// class ThreadPool {
+// public:
+//   ThreadPool(size_t threads = std::thread::hardware_concurrency())
+//       : stop_flag(false) {
+//     for (size_t i = 0; i < threads; ++i) {
+//       workers.emplace_back([this] {
+//         while (!stop_flag) {
+//           std::function<void()> task;
+//           if (queue.try_dequeue(task)) {
+//             task();
+//           } else {
+//             std::this_thread::yield();
+//           }
+//         }
+//       });
+//     }
+//   }
+
+//   ~ThreadPool() {
+//     stop_flag = true;
+//     for (auto &worker : workers) {
+//       worker.join();
+//     }
+//   }
+
+//   template <class F> void enqueue(F &&f) { queue.enqueue(std::forward<F>(f));
+//   }
+
+// private:
+//   std::vector<std::thread> workers;
+//   moodycamel::ConcurrentQueue<std::function<void()>> queue;
+//   std::atomic<bool> stop_flag;
+// };
+
+// class ThreadPool {
+// public:
+//   ThreadPool(size_t numThreads) {
+//     for (size_t i = 0; i < numThreads; ++i) {
+//       threads_.emplace_back([this] {
+//         while (true) {
+//           std::function<void()> task;
+//           if (queue_.try_dequeue(task)) {
+//             task();
+//           } else {
+//             std::this_thread::yield();
+//           }
+//         }
+//       });
+//     }
+//   }
+
+//   ~ThreadPool() {
+//     for (auto &thread : threads_) {
+//       thread.detach();
+//     }
+//   }
+
+//   void enqueue(const std::function<void()> &task) { queue_.enqueue(task); }
+
+// private:
+//   moodycamel::ConcurrentQueue<std::function<void()>> queue_;
+//   std::vector<std::thread> threads_;
+// };

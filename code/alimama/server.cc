@@ -66,10 +66,6 @@ struct LocalResult {
   }
 };
 
-void doSearchLocal(const Request *request, ResponseLocal *response);
-void doSearchMerge(const Request *request, Response *response,
-                   ResponseLocal resp_local[3]);
-
 int main(int argc, char **argv) {
   // TODO(scn): 加上个keyword的话容量暴涨，从21->29，能不能列存？
   static_assert(sizeof(Data) == 29);
@@ -145,7 +141,7 @@ int main(int argc, char **argv) {
 }
 
 void doSearchMerge(const Request *request, Response *response,
-                   ResponseLocal resp_local[3]) {
+                   BatchResponseLocal resp_local[3], int batch_idx) {
   // topn可能会出现随机值！说明request可能已经没了
   auto topn = request->topn();
   std::vector<LocalResult> result;
@@ -155,7 +151,7 @@ void doSearchMerge(const Request *request, Response *response,
   std::vector<LocalResult> preResult;
   preResult.reserve(3 * (topn + 1));
   for (int idx = 0; idx < 3; idx++) {
-    auto &resp = resp_local[idx];
+    auto &resp = resp_local[idx].replys(batch_idx);
     const int sz = resp.array_size();
     if (sz == 0)
       continue;
@@ -232,67 +228,72 @@ void doSearchMerge(const Request *request, Response *response,
   }
 }
 
-void doSearchLocal(const Request *request, ResponseLocal *response) {
-  // 不在本地的keywords直接跳过
-  uint64_t hour = request->hour(), topn = request->topn();
-  float context_vec[2] = {request->context_vector(0),
-                          request->context_vector(1)};
+void doSearchLocal(const BatchRequest *requests, BatchResponseLocal *replys) {
+  replys->mutable_replys()->Reserve(requests->requests_size());
+  for (int k = 0; k < requests->requests_size(); k++) {
+    const Request *request = &(requests->requests(k));
+    ResponseLocal *response = replys->add_replys();
 
-  // TODO(scn): 多个关键词甚至可以并行执行，反正都是只读的！
+    uint64_t hour = request->hour(), topn = request->topn();
+    float context_vec[2] = {request->context_vector(0),
+                            request->context_vector(1)};
 
-  // 反正各种关键词匹配到的广告都搜集起来，然后再合并选出topN的返回
-  // 所以其实各个关键词只需要自己各自匹配topn个就够了
-  // 毕竟keywords可达上百个
-  std::vector<DataScore> preResult;
-  for (int i = 0; i < request->keywords().size(); i++) {
-    uint64_t keyword = request->keywords(i);
-    // TODO(scn): 先用bloom fitler过滤调那些不存在的keyword
-    // 毕竟有2/3的keywords不存在
-    if (kw2index.find(keyword) == kw2index.end())
-      continue;
-    std::vector<DataScore> vec;
-    CalcAdgroupId(keyword, hour, topn, context_vec, vec);
-    // 不需要手动reserve
-    preResult.insert(preResult.end(), vec.begin(), vec.end());
-  }
+    // TODO(scn): 多个关键词甚至可以并行执行，反正都是只读的！
 
-  // 先按照分数排序
-  std::sort(preResult.begin(), preResult.end(),
-            [](const DataScore &ds1, const DataScore &ds2) {
-              // 排序分数高的在前 -> 排序分数相同则出价低的在前 ->
-              // 否则adgroup_id大的在前
-              if (!floatEqual(ds1.score, ds2.score))
-                return ds1.score > ds2.score;
-              else if (ds1.data.keyword_prices != ds2.data.keyword_prices)
-                return ds1.data.keyword_prices < ds2.data.keyword_prices;
-              else
-                return ds1.data.adgroup_id > ds2.data.adgroup_id;
-            });
-
-  // 从preResult中选出topN - 要去重
-  std::vector<DataScore> result;
-  result.reserve(topn + 1);
-
-  absl::flat_hash_set<uint64_t> exist_adgroup_ids;
-  exist_adgroup_ids.reserve(topn + 1);
-  int count = 0;
-  for (int i = 0; i < preResult.size() && count < topn + 1; i++) {
-    const DataScore &ds = preResult[i];
-    if (!exist_adgroup_ids.count(ds.data.adgroup_id)) {
-      // 没有重复的广告单元
-      exist_adgroup_ids.insert(ds.data.adgroup_id);
-      count++;
-      result.emplace_back(ds);
+    // 反正各种关键词匹配到的广告都搜集起来，然后再合并选出topN的返回
+    // 所以其实各个关键词只需要自己各自匹配topn个就够了
+    // 毕竟keywords可达上百个
+    std::vector<DataScore> preResult;
+    for (int i = 0; i < request->keywords().size(); i++) {
+      uint64_t keyword = request->keywords(i);
+      // TODO(scn): 先用bloom fitler过滤调那些不存在的keyword
+      // 毕竟有2/3的keywords不存在
+      if (kw2index.find(keyword) == kw2index.end())
+        continue;
+      std::vector<DataScore> vec;
+      CalcAdgroupId(keyword, hour, topn, context_vec, vec);
+      // 不需要手动reserve
+      preResult.insert(preResult.end(), vec.begin(), vec.end());
     }
-  }
 
-  // 不用再计算最后的出价，直接把result排序号的最多topn+1个元素返回过去
-  response->mutable_array()->Reserve(result.size());
-  for (auto &res : result) {
-    AdgroupResp *adgroup_resp = response->add_array();
-    adgroup_resp->set_adgroup_id(res.data.adgroup_id);
-    adgroup_resp->set_ctr(GetCTR(res.data, context_vec[0], context_vec[1]));
-    adgroup_resp->set_score(res.score);
-    adgroup_resp->set_price(res.data.keyword_prices);
+    // 先按照分数排序
+    std::sort(preResult.begin(), preResult.end(),
+              [](const DataScore &ds1, const DataScore &ds2) {
+                // 排序分数高的在前 -> 排序分数相同则出价低的在前 ->
+                // 否则adgroup_id大的在前
+                if (!floatEqual(ds1.score, ds2.score))
+                  return ds1.score > ds2.score;
+                else if (ds1.data.keyword_prices != ds2.data.keyword_prices)
+                  return ds1.data.keyword_prices < ds2.data.keyword_prices;
+                else
+                  return ds1.data.adgroup_id > ds2.data.adgroup_id;
+              });
+
+    // 从preResult中选出topN - 要去重
+    std::vector<DataScore> result;
+    result.reserve(topn + 1);
+
+    absl::flat_hash_set<uint64_t> exist_adgroup_ids;
+    exist_adgroup_ids.reserve(topn + 1);
+    int count = 0;
+    for (int i = 0; i < preResult.size() && count < topn + 1; i++) {
+      const DataScore &ds = preResult[i];
+      if (!exist_adgroup_ids.count(ds.data.adgroup_id)) {
+        // 没有重复的广告单元
+        exist_adgroup_ids.insert(ds.data.adgroup_id);
+        count++;
+        result.emplace_back(ds);
+      }
+    }
+
+    // 不用再计算最后的出价，直接把result排序号的最多topn+1个元素返回过去
+    response->mutable_array()->Reserve(result.size());
+    for (auto &res : result) {
+      AdgroupResp *adgroup_resp = response->add_array();
+      adgroup_resp->set_adgroup_id(res.data.adgroup_id);
+      adgroup_resp->set_ctr(GetCTR(res.data, context_vec[0], context_vec[1]));
+      adgroup_resp->set_score(res.score);
+      adgroup_resp->set_price(res.data.keyword_prices);
+    }
   }
 }
